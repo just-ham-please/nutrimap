@@ -66,7 +66,7 @@ def clean_food_data(raw_folder: str = RAW_FOLDER,
     raw_folder = Path(raw_folder)
 
     # ---------------------------------------------------
-    # Load parquet file 
+    # Load parquet file
     # ---------------------------------------------------
     file_path = "../raw_data/data.parquet"
     df = pd.read_parquet(file_path, engine="fastparquet")
@@ -79,15 +79,15 @@ def clean_food_data(raw_folder: str = RAW_FOLDER,
     df_clean = df[COLUMNS_TO_KEEP].copy()
 
     df_clean = df_clean.rename(columns=RENAME_COLUMNS)
-    
-    
-    
+
+
+
     # ---------------------------------------------------
-    # remove branded foods from the dataset 500k ->7k 
+    # remove branded foods from the dataset 500k ->7k
     # ---------------------------------------------------
     df_clean = df_clean[df_clean["data_type"] != "branded_food"].reset_index(drop=True)
-    
-    
+
+
     # ---------------------------------------------------
     # add column with energy in kcal calculated
     # ---------------------------------------------------
@@ -96,11 +96,11 @@ def clean_food_data(raw_folder: str = RAW_FOLDER,
         df_clean["carbs_g"] * 4 +
         df_clean["protein_g"] * 4
     ).round(1)
-    
+
     # ---------------------------------------------------
-    # replace NaN in sat fat column with 0 where likely 0 
+    # replace NaN in sat fat column with 0 where likely 0
     # ---------------------------------------------------
-    
+
     df_clean["satfat_g"] = np.where(
     (df_clean["fat_g"] < 3) &
     (df_clean["satfat_g"].isna()),
@@ -109,38 +109,44 @@ def clean_food_data(raw_folder: str = RAW_FOLDER,
     )
 
     # ---------------------------------------------------
-    # replace NaN in fiber column with 0 where likely 0 
+    # replace NaN in fiber column with 0 where likely 0
     # ---------------------------------------------------
-    
+
     df_clean["fiber_g"] = np.where(
     (df_clean["carbs_g"] < 5) &
     (df_clean["fiber_g"].isna()),
     0,
     df_clean["fiber_g"]
     )
-    
-    
+
+
 
     # ---------------------------------------------------
-    # Drop duplicates and drop NaN 
+    # Drop duplicates and drop NaN
     # ---------------------------------------------------
     df_clean = df_clean.drop_duplicates()
-    
+
     """the cols_required are mandatory for modelling, in case they are NaN they are dropped
     CAVE: there will reamain NaNs in fibre and saturated fats!"""
-    
+
     cols_required = [
     "food_item",
     "energy_kcal_calculated",
     "fat_g",
     "carbs_g",
-    "protein_g", 
+    "protein_g",
     "fiber_g",
     "satfat_g"
     ]
 
     df_clean = df_clean.dropna(subset=cols_required)
-    
+
+
+    # ---------------------------------------------------
+    # Remove column data_type and energy_kcal
+    # ---------------------------------------------------
+    df_clean = df_clean.drop(columns=["data_type", "energy_kcal"])
+
 
     # ---------------------------------------------------
     # Save output
@@ -149,7 +155,7 @@ def clean_food_data(raw_folder: str = RAW_FOLDER,
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     df_clean.to_csv(output_path, index=False)
-    
+
     return df_clean
 
 
@@ -191,7 +197,7 @@ def scale_food_data(input_clean_path: str = CLEANED_PATH,
     scaler = MinMaxScaler()
 
     numeric_cols = df_clean.select_dtypes(include=["float64", "int64"]).columns
-    feature_cols = [col for col in numeric_cols if col != "food"]
+    feature_cols = [col for col in numeric_cols if col != "food_item"]
 
     df_scaled = df_clean.copy()
     df_scaled[feature_cols] = scaler.fit_transform(df_clean[feature_cols])
