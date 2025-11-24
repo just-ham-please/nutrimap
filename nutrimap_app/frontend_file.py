@@ -1,7 +1,8 @@
 import streamlit as st
+from pathlib import Path
 import requests
-import random
 import time
+import pandas as pd
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="NutriMap Demo", layout="centered")
@@ -67,21 +68,38 @@ st.markdown("---")
 st.header("🍽️ NutriMap – V1 Prototype")
 st.write("Select your main ingredients from the dropdowns below:")
 
-# Define ingredient lists once
-protein_list = [
-    "Chicken Breast", "Tofu", "Lentils", "Eggs", "Greek Yogurt",
-    "Salmon", "Beans", "Cottage Cheese"
-]
+# Determine absolute path to this file
+BASE_DIR = Path(__file__).resolve().parent  # /nutrimap/nutrimap_app
 
-carb_list = [
-    "Rice", "Pasta", "Quinoa", "Potatoes", "Oats",
-    "Wholegrain Bread", "Couscous", "Sweet Potato"
-]
+# --- load UI data (dummy for now, later real cleaned CSV) ---
+CSV_PATH = BASE_DIR.parent / "test_data_justus" / "foods_ui_dummy.csv"
+df_ui = pd.read_csv(CSV_PATH)
 
-fat_list = [
-    "Olive Oil", "Avocado", "Nuts", "Seeds",
-    "Butter", "Cheese", "Tahini", "Peanut Butter"
-]
+# --- split by plate_role ---
+protein_list = (
+    df_ui[df_ui["plate_role"] == "protein"]["food_name"]
+    .dropna()
+    .sort_values()
+    .unique()
+    .tolist()
+)
+
+carb_list = (
+    df_ui[df_ui["plate_role"] == "carb"]["food_name"]
+    .dropna()
+    .sort_values()
+    .unique()
+    .tolist()
+)
+
+fat_list = (
+    df_ui[df_ui["plate_role"] == "fat"]["food_name"]
+    .dropna()
+    .sort_values()
+    .unique()
+    .tolist()
+)
+
 
 # Layout: left = inputs + button, right = summary & suggestion
 col_left, col_right = st.columns([2, 1])
@@ -100,20 +118,31 @@ with col_right:
         f"- **Carbs:** {carb_option}  \n"
         f"- **Fats:** {fat_option}"
     )
-
     if calculate:
+        payload = {
+            "protein": protein_option,
+            "carb": carb_option,
+            "fat": fat_option
+        }
+
         with st.spinner("Calculating better alternatives..."):
-            time.sleep(1.5)  # simulate processing delay
+            time.sleep(1.0)  # optional Demo-Delay
+            try:
+                response = requests.post(
+                    f"{API_URL.rstrip('/')}/optimize_plate",
+                    json=payload,
+                    timeout=10
+                )
+                response.raise_for_status()
+                data = response.json()
 
-            suggested_protein = random.choice(protein_list)
-            suggested_carb = random.choice(carb_list)
-            suggested_fat = random.choice(fat_list)
-
-        st.subheader("Suggested improvement")
-        st.success(
-            f"Better alternatives could be **{suggested_protein}** as protein, "
-            f"**{suggested_carb}** as carbs and **{suggested_fat}** as fats."
-        )
+                st.subheader("Suggested improvement")
+                st.success(
+                    f"Better alternatives could be **{data['better_protein']}** as protein, "
+                    f"**{data['better_carb']}** as carbs and **{data['better_fat']}** as fats."
+                )
+            except Exception as e:
+                st.error(f"Optimization failed: {e}")
 
 st.markdown("---")
 st.caption("NutriMap V1 prototype – backend not connected yet.")
