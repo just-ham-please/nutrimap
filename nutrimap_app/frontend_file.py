@@ -1,148 +1,161 @@
 import streamlit as st
-from pathlib import Path
 import requests
-import time
 import pandas as pd
+import altair as alt
+from pathlib import Path
 
-# --- PAGE CONFIG ---
-st.set_page_config(page_title="NutriMap Demo", layout="centered")
+# ------------------------------------------------------------
+# CONFIG
+# ------------------------------------------------------------
 
-# --- GREEN BUTTON ONLY (NO GLOBAL BACKGROUND/TEXT CHANGES) ---
-st.markdown(
-    """
-    <style>
-    .stButton > button {
-        background-color: #22a34f;
-        color: white;
-        border-radius: 8px;
-        border: none;
-        padding: 0.4rem 0.9rem;
-    }
-    .stButton > button:hover {
-        background-color: #1b7c3a;
-        color: white;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+API_URL = "http://127.0.0.1:8000"   # Lokales Backend
+# Für Deployment später z. B.:
+# API_URL = "https://dein-backend-url"
 
-API_URL = "https://api-nutrimap-1002154750813.europe-west1.run.app/"
 
-st.title("NutriMap Demo")
+st.set_page_config(page_title="NutriMap – Plate Analyzer", layout="centered")
+st.title("NutriMap – Plate Analyzer 🍽️")
 
-st.markdown(
-    "Below you find a small demo: on top the old flower test model, "
-    "followed by the first NutriMap V1 ingredient selector."
-)
 
-# ==========================================
-# DEV / DEBUG SECTION – OLD FLOWER MODEL
-# ==========================================
-with st.expander("🔬 Dummy Model – Flowers (dev only)"):
-    st.caption("Legacy Iris model for API testing. Not part of the NutriMap UI.")
+# ------------------------------------------------------------
+# LOAD FOOD DATA
+# ------------------------------------------------------------
 
-    sepal_length = st.slider("Select a value A", min_value=0, max_value=4, value=1, step=1)
-    sepal_width = st.slider("Select a value B", min_value=0, max_value=4, value=1, step=1)
-    petal_length = st.slider("Select a value C", min_value=0, max_value=4, value=1, step=1)
-    petal_width = st.slider("Select a value D", min_value=0, max_value=4, value=1, step=1)
+BASE_DIR = Path(__file__).resolve().parent
+CSV_PATH = BASE_DIR / "foods_dummy.csv"
 
-    url = f"{API_URL}/predict"
-    params = {
-        "sepal_length": sepal_length,
-        "sepal_width": sepal_width,
-        "petal_length": petal_length,
-        "petal_width": petal_width,
-    }
+df = pd.read_csv(CSV_PATH)
+
+df["food_item"] = df["food_item"].astype(str)
+df["plate_role_category"] = df["plate_role_category"].astype(str)
+
+roles = ["protein", "carb", "veg", "fat"]
+
+role_to_food_list = {
+    role: sorted(df[df["plate_role_category"] == role]["food_item"].unique().tolist())
+    for role in roles
+}
+
+
+# ------------------------------------------------------------
+# UI: INGREDIENT SELECTION
+# ------------------------------------------------------------
+
+st.subheader("1️⃣ Select Ingredients")
+
+cols = st.columns(4)
+
+protein_item = cols[0].selectbox("Protein", role_to_food_list["protein"])
+carb_item    = cols[1].selectbox("Carb",    role_to_food_list["carb"])
+veg_item     = cols[2].selectbox("Veg",     role_to_food_list["veg"])
+fat_item     = cols[3].selectbox("Fat",     role_to_food_list["fat"])
+
+
+st.subheader("2️⃣ Specify Amounts (grams)")
+
+gcols = st.columns(4)
+
+protein_g = gcols[0].number_input("Protein (g)", min_value=0, max_value=500, value=150, step=10)
+carb_g    = gcols[1].number_input("Carb (g)",    min_value=0, max_value=500, value=120, step=10)
+veg_g     = gcols[2].number_input("Veg (g)",     min_value=0, max_value=500, value=80,  step=10)
+fat_g     = gcols[3].number_input("Fat (g)",     min_value=0, max_value=200, value=10,  step=5)
+
+# Payload für Backend
+payload = {
+    "ingredients": [
+        {"role": "protein", "food_name": protein_item, "grams": protein_g},
+        {"role": "carb",    "food_name": carb_item,    "grams": carb_g},
+        {"role": "veg",     "food_name": veg_item,     "grams": veg_g},
+        {"role": "fat",     "food_name": fat_item,     "grams": fat_g},
+    ]
+}
+
+
+# ------------------------------------------------------------
+# API CALL + VISUALISIERUNG
+# ------------------------------------------------------------
+
+st.subheader("3️⃣ Analyze your plate")
+
+if st.button("Analyze Plate"):
+    st.write("Sending request...")
 
     try:
-        response = requests.get(url, params=params, timeout=3).json()
-        st.success(f"This flower belongs to category **{str(response['prediction'])}**")
-    except Exception:
-        st.warning("Backend not reachable – expected for this demo.")
+        resp = requests.post(f"{API_URL}/plate/analyze", json=payload, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
 
-# ==========================================
-# MAIN SECTION – NUTRIMAP V1
-# ==========================================
-st.markdown("---")
-st.header("🍽️ NutriMap – V1 Prototype")
-st.write("Select your main ingredients from the dropdowns below:")
+        st.success("Plate analyzed successfully!")
 
-# Determine absolute path to this file
-BASE_DIR = Path(__file__).resolve().parent  # /nutrimap/nutrimap_app
+        actual = data["actual"]
+        target = data["target"]
+        gaps   = data["gaps"]
 
-# --- load UI data (dummy for now, later real cleaned CSV) ---
-CSV_PATH = BASE_DIR.parent / "test_data_justus" / "foods_ui_dummy.csv"
-df_ui = pd.read_csv(CSV_PATH)
+        # ----------------------------------------------------
+        # A) Prozent des Optimalwerts (0–200 % Skala)
+        # ----------------------------------------------------
+        st.subheader("📊 Coverage vs. Optimal (in %)")
 
-# --- split by plate_role ---
-protein_list = (
-    df_ui[df_ui["plate_role"] == "protein"]["food_name"]
-    .dropna()
-    .sort_values()
-    .unique()
-    .tolist()
-)
+        percent_rows = []
+        for nutrient, a_val in actual.items():
+            t_val = target.get(nutrient, 0)
+            if t_val and t_val != 0:
+                pct = a_val / t_val * 100
+                percent_rows.append({
+                    "nutrient": nutrient,
+                    "percent_of_optimal": pct
+                })
 
-carb_list = (
-    df_ui[df_ui["plate_role"] == "carb"]["food_name"]
-    .dropna()
-    .sort_values()
-    .unique()
-    .tolist()
-)
+        percent_df = pd.DataFrame(percent_rows)
 
-fat_list = (
-    df_ui[df_ui["plate_role"] == "fat"]["food_name"]
-    .dropna()
-    .sort_values()
-    .unique()
-    .tolist()
-)
-
-
-# Layout: left = inputs + button, right = summary & suggestion
-col_left, col_right = st.columns([2, 1])
-
-with col_left:
-    protein_option = st.selectbox("🥩 Protein source", protein_list)
-    carb_option = st.selectbox("🍞 Carb source", carb_list)
-    fat_option = st.selectbox("🥑 Fat source", fat_list)
-
-    calculate = st.button("Calculate better alternatives")
-
-with col_right:
-    st.subheader("Your dish")
-    st.markdown(
-        f"- **Protein:** {protein_option}  \n"
-        f"- **Carbs:** {carb_option}  \n"
-        f"- **Fats:** {fat_option}"
-    )
-    if calculate:
-        payload = {
-            "protein": protein_option,
-            "carb": carb_option,
-            "fat": fat_option
-        }
-
-        with st.spinner("Calculating better alternatives..."):
-            time.sleep(1.0)  # optional Demo-Delay
-            try:
-                response = requests.post(
-                    f"{API_URL.rstrip('/')}/optimize_plate",
-                    json=payload,
-                    timeout=10
+        if not percent_df.empty:
+            chart = (
+                alt.Chart(percent_df)
+                .mark_bar()
+                .encode(
+                    x=alt.X("nutrient:N", title="Nutrient"),
+                    y=alt.Y(
+                        "percent_of_optimal:Q",
+                        title="% of optimal",
+                        scale=alt.Scale(domain=[0, 200])  # 0–200 % Anzeige
+                    ),
+                    tooltip=["nutrient", "percent_of_optimal"]
                 )
-                response.raise_for_status()
-                data = response.json()
+                .properties(height=300)
+            )
 
-                st.subheader("Suggested improvement")
-                st.success(
-                    f"Better alternatives could be **{data['better_protein']}** as protein, "
-                    f"**{data['better_carb']}** as carbs and **{data['better_fat']}** as fats."
-                )
-            except Exception as e:
-                st.error(f"Optimization failed: {e}")
+            # Referenzlinie bei 100 %
+            rule = alt.Chart(pd.DataFrame({"y": [100]})).mark_rule(strokeDash=[4, 4]).encode(y="y:Q")
 
-st.markdown("---")
-st.caption("NutriMap V1 prototype – backend not connected yet.")
+            st.altair_chart(chart + rule, use_container_width=True)
+        else:
+            st.info("No nutrients with non-zero targets found for percentage chart.")
+
+        # ----------------------------------------------------
+        # B) Tabelle: Actual, Optimal, Abweichungen
+        # ----------------------------------------------------
+        st.subheader("📋 Nutrient Details")
+
+        table_rows = []
+        for nutrient, gap in gaps.items():
+            table_rows.append({
+                "Nutrient": nutrient,
+                "Actual": gap["actual"],
+                "Optimal": gap["target"],
+                "Δ abs": gap["delta"],
+                "Δ %": gap["delta_pct"],
+            })
+
+        table_df = pd.DataFrame(table_rows)
+        table_df = table_df.set_index("Nutrient")
+
+        st.dataframe(table_df)
+
+        # ----------------------------------------------------
+        # C) Debug ganz unten
+        # ----------------------------------------------------
+        st.subheader("🛠 Debug: Raw API Response")
+        st.json(data)
+
+    except Exception as e:
+        st.error(f"Error: {e}")
