@@ -106,30 +106,83 @@ def kmeanModel(
     )
 
 def subclustering(df_with_clusters):
-    ''' This function takes in a dataframe with clusters,
-    runs subclustering and
-    returns a dataframe with subclusters added.
-    '''
-    df = df_with_clusters
+    """
+    Run subclustering on clusters 0 and 1.
+    All other clusters get subcluster = -1.
+    Returns the full dataframe with a new 'subcluster' column.
+    """
 
-    zero_cluster_df = df[df["cluster"] == 0]
-    one_cluster_df = df[df["cluster"] == 1]
-    X_zero = zero_cluster_df.drop(columns=["food_item", "cluster"])
-    X_one = one_cluster_df.drop(columns=["food_item", "cluster"])
+    df = df_with_clusters.copy()
+    df["subcluster"] = -1   # default for clusters not subclustered
 
-    # Subcluster 0
-    model0 = KMeans(n_clusters=3, random_state=42)
-    labels0 = model0.fit_predict(X_zero)
-    zero_cluster_df["subcluster"] = labels0
+    # ----- Subcluster cluster 0 -----
+    mask0 = df["cluster"] == 0
+    if mask0.sum() > 1:  # KMeans needs at least 2 rows
+        X0 = df.loc[mask0].drop(columns=["food_item", "cluster"])
+        model0 = KMeans(n_clusters=2, random_state=42)
+        df.loc[mask0, "subcluster"] = model0.fit_predict(X0)
 
-    # Subcluster 1
-    model1 = KMeans(n_clusters=3, random_state=42)
-    labels1 = model1.fit_predict(X_one)
-    one_cluster_df["subcluster"] = labels1
+    # ----- Subcluster cluster 1 -----
+    mask1 = df["cluster"] == 1
+    if mask1.sum() > 1:
+        X1 = df.loc[mask1].drop(columns=["food_item", "cluster"])
+        model1 = KMeans(n_clusters=2, random_state=42)
+        df.loc[mask1, "subcluster"] = model1.fit_predict(X1)
 
-    df = pd.concat([zero_cluster_df, one_cluster_df], axis=0).fillna(0)
+    # Ensure integer dtype
     df["subcluster"] = df["subcluster"].astype(int)
+
     return df
+
+
+def assign_plate_role(df_with_subclusters: pd.DataFrame) -> pd.DataFrame:
+    """
+    Add a 'plate_role' column based on the following mapping:
+
+        cluster = 0 and subcluster = 0 → 'fruit / veg'
+        cluster = 0 and subcluster = 1 → 'protein'
+        cluster = 1 and subcluster = 0 → 'carbs'
+        cluster = 2                    → 'protein'
+        cluster = 3                    → 'fat'
+        cluster = 4                    → 'protein'
+        all others                     → 'other'
+
+    Parameters
+    ----------
+    df_with_subclusters : pd.DataFrame
+        Dataframe returned by subclustering(), must contain
+        'cluster' and 'subcluster' columns.
+
+    Returns
+    -------
+    pd.DataFrame
+        Updated dataframe including a new 'plate_role' column.
+    """
+
+    df = df_with_subclusters.copy()
+
+    # Default role for anything not mapped above
+    df["plate_role"] = "other"
+
+    # Cluster 0
+    df.loc[(df["cluster"] == 0) & (df["subcluster"] == 0), "plate_role"] = "fruit / veg"
+    df.loc[(df["cluster"] == 0) & (df["subcluster"] == 1), "plate_role"] = "protein"
+
+    # Cluster 1
+    df.loc[(df["cluster"] == 1) & (df["subcluster"] == 0), "plate_role"] = "carbs"
+
+    # Cluster 2
+    df.loc[df["cluster"] == 2, "plate_role"] = "protein"
+
+    # Cluster 3
+    df.loc[df["cluster"] == 3, "plate_role"] = "fat"
+
+    # Cluster 4
+    df.loc[df["cluster"] == 4, "plate_role"] = "protein"
+
+    return df
+
+
 
 
 if __name__ == "__main__":
