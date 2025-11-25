@@ -1,26 +1,161 @@
 import streamlit as st
 import requests
+import pandas as pd
+import altair as alt
+from pathlib import Path
 
- # Change this URL to the one of your API
-API_URL = "https://api-nutrimap-1002154750813.europe-west1.run.app/"
+# ------------------------------------------------------------
+# CONFIG
+# ------------------------------------------------------------
 
-st.title("NutriMap - Test")
+API_URL = "http://127.0.0.1:8000"   # Lokales Backend
+# Für Deployment später z. B.:
+# API_URL = "https://dein-backend-url"
 
-st.write("Nutrimap test - ignore errors, backend is not properly configured :)")
 
-sepal_length = st.slider('Select a value for Carbs', min_value=0, max_value=4, value=1, step=1)
-sepal_width = st.slider('Select a value for Protein',  min_value=0, max_value=4, value=1, step=1)
-petal_length = st.slider('Select a value for Total Fats',  min_value=0, max_value=4, value=1, step=1)
-petal_width = st.slider('Select a value for Unsaturated Fats',  min_value=0, max_value=4, value=1, step=1)
+st.set_page_config(page_title="NutriMap – Plate Analyzer", layout="centered")
+st.title("NutriMap – Plate Analyzer 🍽️")
 
-url = f"{API_URL}/predict"
-params = {
-    'sepal_length': sepal_length,
-    'sepal_width': sepal_width,
-    'petal_length': petal_length,
-    'petal_width': petal_width,
+
+# ------------------------------------------------------------
+# LOAD FOOD DATA
+# ------------------------------------------------------------
+
+BASE_DIR = Path(__file__).resolve().parent
+CSV_PATH = BASE_DIR / "foods_dummy.csv"
+
+df = pd.read_csv(CSV_PATH)
+
+df["food_item"] = df["food_item"].astype(str)
+df["plate_role_category"] = df["plate_role_category"].astype(str)
+
+roles = ["protein", "carb", "veg", "fat"]
+
+role_to_food_list = {
+    role: sorted(df[df["plate_role_category"] == role]["food_item"].unique().tolist())
+    for role in roles
 }
 
-response = requests.get(url, params=params).json()
 
-st.write(f"This flower belongs to category {str(response['prediction'])}")
+# ------------------------------------------------------------
+# UI: INGREDIENT SELECTION
+# ------------------------------------------------------------
+
+st.subheader("1️⃣ Select Ingredients")
+
+cols = st.columns(4)
+
+protein_item = cols[0].selectbox("Protein", role_to_food_list["protein"])
+carb_item    = cols[1].selectbox("Carb",    role_to_food_list["carb"])
+veg_item     = cols[2].selectbox("Veg",     role_to_food_list["veg"])
+fat_item     = cols[3].selectbox("Fat",     role_to_food_list["fat"])
+
+
+st.subheader("2️⃣ Specify Amounts (grams)")
+
+gcols = st.columns(4)
+
+protein_g = gcols[0].number_input("Protein (g)", min_value=0, max_value=500, value=150, step=10)
+carb_g    = gcols[1].number_input("Carb (g)",    min_value=0, max_value=500, value=120, step=10)
+veg_g     = gcols[2].number_input("Veg (g)",     min_value=0, max_value=500, value=80,  step=10)
+fat_g     = gcols[3].number_input("Fat (g)",     min_value=0, max_value=200, value=10,  step=5)
+
+# Payload für Backend
+payload = {
+    "ingredients": [
+        {"role": "protein", "food_name": protein_item, "grams": protein_g},
+        {"role": "carb",    "food_name": carb_item,    "grams": carb_g},
+        {"role": "veg",     "food_name": veg_item,     "grams": veg_g},
+        {"role": "fat",     "food_name": fat_item,     "grams": fat_g},
+    ]
+}
+
+
+# ------------------------------------------------------------
+# API CALL + VISUALISIERUNG
+# ------------------------------------------------------------
+
+st.subheader("3️⃣ Analyze your plate")
+
+if st.button("Analyze Plate"):
+    st.write("Sending request...")
+
+    try:
+        resp = requests.post(f"{API_URL}/plate/analyze", json=payload, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+
+        st.success("Plate analyzed successfully!")
+
+        actual = data["actual"]
+        target = data["target"]
+        gaps   = data["gaps"]
+
+        # ----------------------------------------------------
+        # A) Prozent des Optimalwerts (0–200 % Skala)
+        # ----------------------------------------------------
+        st.subheader("📊 Coverage vs. Optimal (in %)")
+
+        percent_rows = []
+        for nutrient, a_val in actual.items():
+            t_val = target.get(nutrient, 0)
+            if t_val and t_val != 0:
+                pct = a_val / t_val * 100
+                percent_rows.append({
+                    "nutrient": nutrient,
+                    "percent_of_optimal": pct
+                })
+
+        percent_df = pd.DataFrame(percent_rows)
+
+        if not percent_df.empty:
+            chart = (
+                alt.Chart(percent_df)
+                .mark_bar()
+                .encode(
+                    x=alt.X("nutrient:N", title="Nutrient"),
+                    y=alt.Y(
+                        "percent_of_optimal:Q",
+                        title="% of optimal",
+                        scale=alt.Scale(domain=[0, 200])  # 0–200 % Anzeige
+                    ),
+                    tooltip=["nutrient", "percent_of_optimal"]
+                )
+                .properties(height=300)
+            )
+
+            # Referenzlinie bei 100 %
+            rule = alt.Chart(pd.DataFrame({"y": [100]})).mark_rule(strokeDash=[4, 4]).encode(y="y:Q")
+
+            st.altair_chart(chart + rule, use_container_width=True)
+        else:
+            st.info("No nutrients with non-zero targets found for percentage chart.")
+
+        # ----------------------------------------------------
+        # B) Tabelle: Actual, Optimal, Abweichungen
+        # ----------------------------------------------------
+        st.subheader("📋 Nutrient Details")
+
+        table_rows = []
+        for nutrient, gap in gaps.items():
+            table_rows.append({
+                "Nutrient": nutrient,
+                "Actual": gap["actual"],
+                "Optimal": gap["target"],
+                "Δ abs": gap["delta"],
+                "Δ %": gap["delta_pct"],
+            })
+
+        table_df = pd.DataFrame(table_rows)
+        table_df = table_df.set_index("Nutrient")
+
+        st.dataframe(table_df)
+
+        # ----------------------------------------------------
+        # C) Debug ganz unten
+        # ----------------------------------------------------
+        st.subheader("🛠 Debug: Raw API Response")
+        st.json(data)
+
+    except Exception as e:
+        st.error(f"Error: {e}")
