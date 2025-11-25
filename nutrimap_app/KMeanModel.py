@@ -73,7 +73,7 @@ def build_kmeans_model(
     X = scaled_df.drop(columns=["food_item"], errors="ignore")
 
     # Fixed k=3
-    k = 3
+    k = 5
     model = KMeans(n_clusters=k, random_state=random_state)
     labels = model.fit_predict(X)
 
