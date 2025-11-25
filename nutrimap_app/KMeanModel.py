@@ -105,6 +105,32 @@ def kmeanModel(
         save_data=save_data,
     )
 
+def subclustering(df_with_clusters):
+    ''' This function takes in a dataframe with clusters,
+    runs subclustering and
+    returns a dataframe with subclusters added.
+    '''
+    df = df_with_clusters
+
+    zero_cluster_df = df[df["cluster"] == 0]
+    one_cluster_df = df[df["cluster"] == 1]
+    X_zero = zero_cluster_df.drop(columns=["food_item", "cluster"])
+    X_one = one_cluster_df.drop(columns=["food_item", "cluster"])
+
+    # Subcluster 0
+    model0 = KMeans(n_clusters=3, random_state=42)
+    labels0 = model0.fit_predict(X_zero)
+    zero_cluster_df["subcluster"] = labels0
+
+    # Subcluster 1
+    model1 = KMeans(n_clusters=3, random_state=42)
+    labels1 = model1.fit_predict(X_one)
+    one_cluster_df["subcluster"] = labels1
+
+    df = pd.concat([zero_cluster_df, one_cluster_df], axis=0).fillna(0)
+    df["subcluster"] = df["subcluster"].astype(int)
+    return df
+
 
 if __name__ == "__main__":
     model, df_clusters = build_kmeans_model()
