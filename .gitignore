@@ -21,6 +21,7 @@ dist/
 *.csv
 *.sqlite
 *.zip
+*.parquet
 
 *.sublime-project
 *.sublime-workspace
@@ -28,3 +29,6 @@ dist/
 
 # Other
 pytestdebug.log
+
+# Model files
+*.pkl
