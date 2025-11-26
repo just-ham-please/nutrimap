@@ -114,6 +114,9 @@ def subclustering(df_with_clusters, save_data: bool = True):
     '''
     df = df_with_clusters.copy()
 
+    # df with rest of clusters - 2,3,4
+    df_rest = df[df["cluster"] > 1].copy()
+
     # Run subclustering
     zero_cluster_df = df[df["cluster"] == 0].copy()
     one_cluster_df = df[df["cluster"] == 1].copy()
@@ -135,7 +138,7 @@ def subclustering(df_with_clusters, save_data: bool = True):
     labels1 = model1.fit_predict(X_one)
     one_cluster_df["subcluster"] = labels1
 
-    df = pd.concat([zero_cluster_df, one_cluster_df], axis=0).fillna(0)
+    df = pd.concat([zero_cluster_df, one_cluster_df,df_rest], axis=0).fillna(0)
     df["subcluster"] = df["subcluster"].astype(int)
 
     # Create the supercluster column by joining the cluster and subcluster columns
