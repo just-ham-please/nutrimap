@@ -1,5 +1,5 @@
 from nutrimap_app.data_prep_marie import clean_food_data, scale_food_data
-from nutrimap_app.KMeanModel import kmeanModel, subclustering
+from nutrimap_app.KMeanModel import kmeanModel, subclustering, assign_plate_role
 
 def build_all():
     df_clean = clean_food_data()
@@ -9,7 +9,9 @@ def build_all():
 
     df_with_subclusters = subclustering(df_clusters)
 
-    return model, df_with_subclusters
+    df_plate_role = assign_plate_role(df_with_subclusters)
+
+    return model, df_plate_role
 
 
 if __name__ == "__main__":

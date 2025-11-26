@@ -36,6 +36,7 @@ DATA_DIR = PROJECT_ROOT / "data/processed"
 BEST_MODEL_PATH = MODELS_DIR / "best_model.pkl"
 CLUSTERED_DATA_PATH = DATA_DIR / "food_with_clusters.csv"
 SUBCLUSTERING_DATA_PATH = DATA_DIR / "food_with_subclusters.csv"
+PLATE_ROLE_DATA_PATH = DATA_DIR / "food_with_plate_roles.csv"
 
 
 def _prepare_data() -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -148,6 +149,48 @@ def subclustering(df_with_clusters, save_data: bool = True):
     if save_data:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         df.to_csv(SUBCLUSTERING_DATA_PATH, index=False)
+
+    return df
+
+def assign_plate_role( df_with_subclusters: pd.DataFrame, save_data: bool = True) -> pd.DataFrame:
+    """
+    Add a 'plate_role' column based on the following mapping:
+        cluster = 0 and subcluster = 0 → 'fruit / veg'
+        cluster = 0 and subcluster = 1 → 'protein'
+        cluster = 1 and subcluster = 0 → 'carbs'
+        cluster = 2                    → 'protein'
+        cluster = 3                    → 'fat'
+        cluster = 4                    → 'protein'
+        all others                     → 'other'
+    Parameters
+    ----------
+    df_with_subclusters : pd.DataFrame
+        Dataframe returned by subclustering(), must contain
+        'cluster' and 'subcluster' columns.
+    Returns
+    -------
+    pd.DataFrame
+        Updated dataframe including a new 'plate_role' column.
+    """
+    df = df_with_subclusters.copy()
+    # Default role for anything not mapped above
+    df["plate_role"] = "other"
+    # Cluster 0
+    df.loc[(df["cluster"] == 0) & (df["subcluster"] == 0), "plate_role"] = "fruit / veg"
+    df.loc[(df["cluster"] == 0) & (df["subcluster"] == 1), "plate_role"] = "protein"
+    # Cluster 1
+    df.loc[(df["cluster"] == 1) & (df["subcluster"] == 0), "plate_role"] = "carbs"
+    # Cluster 2
+    df.loc[df["cluster"] == 2, "plate_role"] = "protein"
+    # Cluster 3
+    df.loc[df["cluster"] == 3, "plate_role"] = "fat"
+    # Cluster 4
+    df.loc[df["cluster"] == 4, "plate_role"] = "protein"
+
+        # Save outputs
+    if save_data:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        df.to_csv(PLATE_ROLE_DATA_PATH, index=False)
 
     return df
 
