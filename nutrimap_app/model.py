@@ -1,4 +1,4 @@
-from nutrimap_app.data_prep_marie import clean_food_data, scale_food_data
+from nutrimap_app.data_prep_final import clean_food_data, scale_food_data
 from nutrimap_app.KMeanModel import kmeanModel, subclustering
 
 def build_all():

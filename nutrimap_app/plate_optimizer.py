@@ -20,14 +20,12 @@ NUTRIENT_COLS = [
 
 # Optimal plate reference values (simple example)
 OPTIMAL_PLATE = {
-    "energy_kcal": 600,
-    "fat_g": 20,
-    "satfat_g": 5,
-    "carbs_g": 60,
-    "protein_g": 30,
+     "energy_kcal": 666,
+    "protein_g": 17,
+    "carbs_g": 86,
+    "fat_g": 23,
     "fiber_g": 10
 }
-
 
 # ------------------------------------------------------------
 # 2. LOAD DATA
