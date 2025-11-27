@@ -113,14 +113,14 @@ def suggest_food_swap(food_item: str) -> str:
         return f"{col}={row[col]}" if col in row.index else None
 
     possible_cols = [
-        "kcal",
-        "calories",
-        "energy_kcal",
-        "protein",
-        "fiber",
-        "sugars",
-        "fat",
-        "sat_fat",
+        'food_item',
+        'fat_g',
+        'satfat_g,
+        'carbs_g,'
+        'protein_g',
+        'fiber_g',
+        'energy_kcal_calculated',
+        'cluster'
     ]
     original_macros = [
         m for col in possible_cols if (m := format_macro(food_row, col)) is not None
