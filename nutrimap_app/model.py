@@ -9,7 +9,9 @@ def build_all():
 
     df_with_subclusters = subclustering(df_clusters)
 
-    return model, df_with_subclusters
+    df_plate_role = assign_plate_role(df_with_subclusters)
+
+    return model, df_plate_role
 
 
 if __name__ == "__main__":
