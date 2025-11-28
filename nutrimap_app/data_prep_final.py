@@ -68,7 +68,8 @@ def clean_food_data(raw_folder: str = RAW_FOLDER,
     # ---------------------------------------------------
     # Load parquet file
     # ---------------------------------------------------
-    file_path = "../raw_data/data.parquet"
+    #file_path = "../raw_data/data.parquet"
+    file_path = Path(__file__).resolve().parents[1] / "raw_data/data.parquet"
     df = pd.read_parquet(file_path, engine="fastparquet")
 
 
