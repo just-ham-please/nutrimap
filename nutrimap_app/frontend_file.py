@@ -155,8 +155,8 @@ if st.button("Analyze Plate"):
         # ----------------------------------------------------
         # C) Debug ganz unten
         # ----------------------------------------------------
-        st.subheader("🛠 Debug: Raw API Response")
-        st.json(data)
+        # st.subheader("🛠 Debug: Raw API Response")
+        # st.json(data)
 
         # ----------------------------------------------------
         # D) Suggestions from LLM

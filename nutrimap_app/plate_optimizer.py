@@ -7,11 +7,11 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
 # Data from the food with clusters file
-CSV_PATH = BASE_DIR / './data/processed/food_with_plate_roles.csv'
+CSV_PATH = BASE_DIR / '../data/processed/food_with_plate_roles.csv'
 
 # Nutrients we sum up and compare
 NUTRIENT_COLS = [
-    "energy_kcal",
+    "energy_kcal_calculated",
     "fat_g",
     # "satfat_g",
     "carbs_g",
