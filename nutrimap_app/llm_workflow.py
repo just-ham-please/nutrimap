@@ -19,12 +19,15 @@ You can control some settings via environment variables:
 
 import os
 from dotenv import load_dotenv
-
 import pandas as pd
+import requests
+from typing import List, Dict, Any
 
 from langchain.chat_models import init_chat_model
 from langchain.tools import tool
 
+# For local development - API_URL to get access to the responses from the front_end
+API_URL = "http://127.0.0.1:8000"
 
 # ---------------------------------------------------------------------------
 # Configuration & data loading
@@ -35,7 +38,7 @@ load_dotenv()
 GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "gemini-2.0-flash")
 GEMINI_TEMPERATURE = float(os.getenv("GEMINI_TEMPERATURE", "0.3"))
 GEMINI_MAX_OUTPUT_TOKENS = int(os.getenv("GEMINI_MAX_OUTPUT_TOKENS", "512"))
-FOODS_CSV_PATH = os.getenv("FOODS_CSV_PATH", "../data/processed/food_with_clusters.csv")
+FOODS_CSV_PATH = os.getenv("FOODS_CSV_PATH", "./data/processed/food_with_plate_roles.csv")
 
 # Load food dataset once at startup
 if not os.path.exists(FOODS_CSV_PATH):
@@ -55,7 +58,7 @@ FOODS_DF = pd.read_csv(FOODS_CSV_PATH)
 def suggest_food_swap(food_item: str) -> str:
     """
     Given a food name from the dataset, suggest a healthier swap
-    from the same cluster.
+    from the same plate role.
 
     The CSV is expected to contain at least:
     - 'food_item': name of the food
@@ -82,13 +85,13 @@ def suggest_food_swap(food_item: str) -> str:
         )
 
     food_row = df[mask].iloc[0]
-    cluster_value = food_row["cluster"]
+    plate_role_value = food_row["plate_role"]
 
-    # Candidates: same cluster, but different item
-    candidates = df[(df["cluster"] == cluster_value) & (~mask)]
+    # Candidates: same plate role, but different item
+    candidates = df[(df["plate_role"] == plate_role_value) & (~mask)]
     if candidates.empty:
         return (
-            f"I found '{food_item}' in cluster {cluster_value}, "
+            f"I found '{food_item}' in cluster {plate_role_value}, "
             "but there are no alternative items in that cluster."
         )
 
@@ -115,12 +118,14 @@ def suggest_food_swap(food_item: str) -> str:
     possible_cols = [
         'food_item',
         'fat_g',
-        'satfat_g,
-        'carbs_g,'
+        'satfat_g',
+        'carbs_g',
         'protein_g',
         'fiber_g',
         'energy_kcal_calculated',
-        'cluster'
+        'cluster',
+        'subcluster',
+        'plate_role'
     ]
     original_macros = [
         m for col in possible_cols if (m := format_macro(food_row, col)) is not None
@@ -137,7 +142,7 @@ def suggest_food_swap(food_item: str) -> str:
     )
 
     return (
-        f"Original food: {food_row['food_item']} (cluster {cluster_value})\n"
+        f"Original food: {food_row['food_item']} (cluster {plate_role_value})\n"
         f"Nutrition: {original_desc}\n\n"
         f"Suggested swap: {swap_row['food_item']} (same cluster)\n"
         f"Nutrition: {swap_desc}\n\n"
@@ -173,36 +178,116 @@ def build_model():
 # CLI entrypoint
 # ---------------------------------------------------------------------------
 
-def main():
-    model = build_model()
-    print("NutriMap tool-assisted LLM")
-    print("Ask a question like: 'Suggest a healthier swap for chorizo from the dataset.'")
-    print("Press Ctrl+C to exit.\n")
+# ---------------------------------------------------------------------------
+# Plate/LLM workflow helpers
+# ---------------------------------------------------------------------------
 
-    try:
-        while True:
-            user_input = input("Your question: ").strip()
-            if not user_input:
-                continue
-            # First, ask the model to identify the main food item to swap
-            extraction_prompt = (
-                "You are helping with a nutrition tool. "
-                "Given the following user message, identify the single main food item from "
-                "the dataset that should be swapped. Respond with ONLY the food name, "
-                "nothing else.\n\n"
-                f"User message: {user_input}"
+def call_plate_analyze(ingredients: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Call the FastAPI /plate/analyze endpoint and return the JSON result.
+
+    Parameters
+    ----------
+    ingredients: list of dicts with keys ["role", "food_name", "grams"].
+    """
+    payload = {"ingredients": ingredients}
+    response = requests.post(f"{API_URL}/plate/analyze", json=payload, timeout=10)
+    response.raise_for_status()
+    return response.json()
+
+
+def build_prompt_from_plate(plate_result: Dict[str, Any]) -> str:
+    """Turn the plate analysis JSON into a natural-language prompt for the LLM.
+
+    The prompt focuses on the main nutrients and highlights where the plate is
+    over or under the target values. It returns a single string that can be
+    passed as the user message to the model.
+    """
+    actual = plate_result.get("actual", {})
+    target = plate_result.get("target", {})
+    gaps = plate_result.get("gaps", {})
+
+    # Build a compact human-readable summary, focusing on up to 4 biggest gaps
+    # (by absolute percentage difference) if available.
+    gap_items = []
+    for nutrient, info in gaps.items():
+        delta_pct = info.get("delta_pct")
+        if delta_pct is None:
+            continue
+        gap_items.append((nutrient, abs(delta_pct), info))
+
+    gap_items.sort(key=lambda x: x[1], reverse=True)
+    top_gaps = gap_items[:4] if gap_items else []
+
+    summary_lines = ["Here is the analysis of the patient's plate:"]
+
+    if top_gaps:
+        summary_lines.append("The 4 nutrients with the largest deviations from the target are:")
+        for nutrient, _abs_delta_pct, info in top_gaps:
+            summary_lines.append(
+                f"- {nutrient}: actual {info.get('actual')} vs target {info.get('target')} "
+                f"(delta {info.get('delta')}, {info.get('delta_pct')}% from target)"
             )
-            extraction_response = model.invoke(extraction_prompt)
-            food_item = extraction_response.content.strip()
+    else:
+        # Fallback: list all nutrients if for some reason we do not have deltas
+        for nutrient, value in actual.items():
+            t = target.get(nutrient)
+            summary_lines.append(f"- {nutrient}: actual {value}, target {t}")
 
-            # Then, call the CSV-based tool to suggest a swap
-            swap_text = suggest_food_swap.invoke({"food_item": food_item})
+    summary_lines.append(
+        "Based on this plate analysis, suggest concrete nutrition advice and, "
+        "if useful, identify one main food item that should be swapped for a "
+        "healthier alternative. Focus on practical, patient-friendly guidance."
+    )
 
-            print("\n--- Suggestion ---")
-            print(swap_text)
-            print("------------------\n")
-    except KeyboardInterrupt:
-        print("\nExiting NutriMap tool-calling LLM.")
+    return "\n".join(summary_lines)
+
+
+def run_plate_workflow(ingredients: List[Dict[str, Any]]) -> str:
+    """High-level function to be called from Streamlit.
+
+    1. Calls the NutriMap FastAPI /plate/analyze endpoint with the given
+       ingredients.
+    2. Builds a natural-language prompt from the analysis.
+    3. Sends the prompt to the LLM and returns the model's answer as a string.
+
+    This keeps all the LLM-related logic in one place, while Streamlit only
+    needs to pass the ingredients list.
+    """
+    # 1) Call the API
+    plate_result = call_plate_analyze(ingredients)
+
+    # 2) Turn result into a user-style prompt
+    user_prompt = build_prompt_from_plate(plate_result)
+
+    # 3) Ask the model for advice. For now we use a simple single-turn call.
+    model = build_model()
+    response = model.invoke(user_prompt)
+
+    # Many LangChain chat models return an object with a `.content` attribute
+    # that holds the main text.
+    return getattr(response, "content", str(response))
+
+
+# ---------------------------------------------------------------------------
+# CLI entrypoint (for local testing)
+# ---------------------------------------------------------------------------
+
+def main() -> None:
+    """Simple CLI demo for local testing.
+
+    In production, Streamlit should call `run_plate_workflow(...)` directly
+    and display the returned text to the user.
+    """
+    # Example ingredients; replace with real data in your Streamlit app.
+    example_ingredients: List[Dict[str, Any]] = [
+        {"role": "protein", "food_name": "Chicken Breast", "grams": 150},
+        {"role": "carb", "food_name": "White Rice", "grams": 120},
+        {"role": "veg", "food_name": "Broccoli", "grams": 80},
+    ]
+
+    advice = run_plate_workflow(example_ingredients)
+    print("NutriMap LLM advice:\n")
+    print(advice)
 
 
 if __name__ == "__main__":
