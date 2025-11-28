@@ -6,13 +6,14 @@ from pathlib import Path
 # ------------------------------------------------------------
 
 BASE_DIR = Path(__file__).resolve().parent
-CSV_PATH = BASE_DIR / "foods_dummy.csv"   # <-- Datei liegt in nutrimap_app/
+# Data from the food with clusters file
+CSV_PATH = BASE_DIR / '../data/processed/food_with_plate_roles.csv'
 
 # Nutrients we sum up and compare
 NUTRIENT_COLS = [
-    "energy_kcal",
+    "energy_kcal_calculated",
     "fat_g",
-    "satfat_g",
+    # "satfat_g",
     "carbs_g",
     "protein_g",
     "fiber_g"
@@ -20,7 +21,7 @@ NUTRIENT_COLS = [
 
 # Optimal plate reference values (simple example)
 OPTIMAL_PLATE = {
-     "energy_kcal": 666,
+    "energy_kcal": 666,
     "protein_g": 17,
     "carbs_g": 86,
     "fat_g": 23,
@@ -39,7 +40,7 @@ def load_food_data():
     df = pd.read_csv(CSV_PATH)
 
     # Safety: ensure required columns exist
-    required_cols = ["food_item", "plate_role_category"] + NUTRIENT_COLS
+    required_cols = ["food_item", "plate_role"] + NUTRIENT_COLS
     missing = [c for c in required_cols if c not in df.columns]
     if missing:
         raise ValueError(f"Missing columns in CSV: {missing}")

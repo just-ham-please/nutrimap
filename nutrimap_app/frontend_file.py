@@ -3,6 +3,7 @@ import requests
 import pandas as pd
 import altair as alt
 from pathlib import Path
+from nutrimap_app.llm_workflow import run_plate_workflow
 
 # ------------------------------------------------------------
 # CONFIG
@@ -22,17 +23,17 @@ st.title("NutriMap – Plate Analyzer 🍽️")
 # ------------------------------------------------------------
 
 BASE_DIR = Path(__file__).resolve().parent
-CSV_PATH = BASE_DIR / "foods_dummy.csv"
+CSV_PATH = BASE_DIR / "../data/processed/food_with_plate_roles.csv"
 
 df = pd.read_csv(CSV_PATH)
 
 df["food_item"] = df["food_item"].astype(str)
-df["plate_role_category"] = df["plate_role_category"].astype(str)
+df["plate_role"] = df["plate_role"].astype(str)
 
-roles = ["protein", "carb", "veg", "fat"]
+roles = ["protein", "carbs", "fruit / veg", "fat"]
 
 role_to_food_list = {
-    role: sorted(df[df["plate_role_category"] == role]["food_item"].unique().tolist())
+    role: sorted(df[df["plate_role"] == role]["food_item"].unique().tolist())
     for role in roles
 }
 
@@ -46,8 +47,8 @@ st.subheader("1️⃣ Select Ingredients")
 cols = st.columns(4)
 
 protein_item = cols[0].selectbox("Protein", role_to_food_list["protein"])
-carb_item    = cols[1].selectbox("Carb",    role_to_food_list["carb"])
-veg_item     = cols[2].selectbox("Veg",     role_to_food_list["veg"])
+carb_item    = cols[1].selectbox("Carb",    role_to_food_list["carbs"])
+veg_item     = cols[2].selectbox("Veg",     role_to_food_list["fruit / veg"])
 fat_item     = cols[3].selectbox("Fat",     role_to_food_list["fat"])
 
 
@@ -154,8 +155,23 @@ if st.button("Analyze Plate"):
         # ----------------------------------------------------
         # C) Debug ganz unten
         # ----------------------------------------------------
-        st.subheader("🛠 Debug: Raw API Response")
-        st.json(data)
+        # st.subheader("🛠 Debug: Raw API Response")
+        # st.json(data)
+
+        # ----------------------------------------------------
+        # D) Suggestions from LLM
+        # ----------------------------------------------------
+        st.subheader("4️⃣ Suggestions")
+
+        try:
+            # Use the same ingredients the user selected to drive the LLM workflow.
+            llm_response = run_plate_workflow(payload["ingredients"])
+
+            # Nicely formatted LLM output
+            st.markdown("#### Personalized nutrition advice")
+            st.markdown(llm_response)
+        except Exception as e:
+            st.error(f"Error while generating suggestions: {e}")
 
     except Exception as e:
         st.error(f"Error: {e}")
