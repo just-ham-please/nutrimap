@@ -343,6 +343,7 @@ def run_plate_workflow(ingredients: List[Dict[str, Any]]) -> str:
     return getattr(response, "content", str(response))
 
 
+# Function that extracts the food_item from the suggestion llm response.
 def suggestion_to_csv(response: str) -> str:
     '''Build a prompt that asks the LLM to extract swap foods and grams from the
     first LLM suggestion, and return them as a tiny CSV with columns:
@@ -415,6 +416,7 @@ def suggestion_to_csv(response: str) -> str:
 
     return prompt
 
+# Function that runs the extraction of suggestion from suggestion reposone
 def run_post_suggestion_prompt(response: str) -> Dict[str, List[Dict[str, Any]]]:
     '''Second-stage LLM call that turns a free-text suggestion into a structured
     list of ingredients compatible with `compute_plate_nutrients`.
