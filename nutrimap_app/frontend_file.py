@@ -3,7 +3,8 @@ import requests
 import pandas as pd
 import altair as alt
 from pathlib import Path
-from nutrimap_app.llm_workflow import run_plate_workflow
+from nutrimap_app.llm_workflow import run_plate_workflow, run_post_suggestion_prompt
+from nutrimap_app.plate_optimizer import post_suggestion_comparison
 
 # ------------------------------------------------------------
 # CONFIG
@@ -172,6 +173,55 @@ if st.button("Analyze Plate"):
             st.markdown(llm_response)
         except Exception as e:
             st.error(f"Error while generating suggestions: {e}")
+
+        # ----------------------------------------------------
+        # E) Food swaps visualization from LLM
+        # ----------------------------------------------------
+        st.subheader("5️⃣ Food Swap – Nutrient Comparison")
+
+
+
+        try:
+            # 1) Let the LLM workflow extract the swapped foods from its own suggestion text
+            post_suggestion_result = run_post_suggestion_prompt(llm_response)
+
+            # Nicely formatted swap info
+            st.markdown("#### Food Swap Comparison")
+
+            food_swaps = post_suggestion_result.get("food_swap_list", [])
+
+            if not food_swaps:
+                st.info("No swap foods were suggested.")
+            else:
+                st.markdown("**Suggested swap food(s):**")
+                for swap in food_swaps:
+                    st.markdown(
+                        f"- `{swap['food_name']}` "
+                        f"(role: {swap['role']}, grams: {swap['grams']})"
+                    )
+
+            # 2) Use the plate optimizer helper to compute nutrients for the suggested swap
+            swap_comparison = post_suggestion_comparison(post_suggestion_result)
+
+            gaps_swap = swap_comparison["gaps_swap"]
+
+            swap_rows = []
+            for nutrient, gap in gaps_swap.items():
+                swap_rows.append(
+                    {
+                        "Nutrient": nutrient,
+                        "Actual (swap)": gap["actual"],
+                        "Optimal": gap["target"],
+                        "Δ abs (swap)": gap["delta"],
+                        "Δ % (swap)": gap["delta_pct"],
+                    }
+                )
+
+            swap_df = pd.DataFrame(swap_rows).set_index("Nutrient")
+            st.dataframe(swap_df)
+
+        except Exception as e:
+            st.error(f"Error while computing food swap comparison: {e}")
 
     except Exception as e:
         st.error(f"Error: {e}")
