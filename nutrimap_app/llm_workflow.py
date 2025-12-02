@@ -18,12 +18,14 @@ You can control some settings via environment variables:
 """
 
 import os
+from io import StringIO
 from dotenv import load_dotenv
 import pandas as pd
 import requests
 from typing import List, Dict, Any
 
 from langchain.chat_models import init_chat_model
+from langchain_core.messages import HumanMessage
 from langchain.tools import tool
 
 # For local development - API_URL to get access to the responses from the front_end
@@ -75,12 +77,27 @@ def suggest_food_swap(food_item: str) -> str:
             "Please update the tool implementation to match your CSV schema."
         )
 
-    # Case-insensitive match of the requested food
-    mask = df["food_item"].astype(str).str.lower() == food_item.lower()
+    # Normalize and lightly clean the incoming food item string
+    food_item_clean = str(food_item).strip().lower()
+    # If the model accidentally includes extra info like ", grams=120", strip that off
+    for sep in [" grams=", ", grams=", "(grams", " g ", " grams "]:
+        if sep in food_item_clean:
+            food_item_clean = food_item_clean.split(sep)[0].strip()
+            break
+
+    # Case-insensitive match of the requested food (after cleaning)
+    names_lower = df["food_item"].astype(str).str.lower()
+    mask = names_lower == food_item_clean
+
+    # If no exact match, try a more forgiving contains-based match
+    if not mask.any():
+        mask = names_lower.str.contains(food_item_clean, na=False)
+
     if not mask.any():
         available = ", ".join(sorted(df["food_item"].astype(str).head(20)))
         return (
-            f"I couldn't find '{food_item}' in the dataset.\n"
+            f"I couldn't find '{food_item}' in the dataset after normalization "
+            f"('{food_item_clean}').\n"
             f"Example foods I do know: {available}"
         )
 
@@ -171,7 +188,8 @@ def build_model():
             "swapped, based on the user's description."
         ),
     )
-    return model
+    model_with_tools = model.bind_tools([suggest_food_swap])
+    return model_with_tools
 
 
 # ---------------------------------------------------------------------------
@@ -195,7 +213,8 @@ def call_plate_analyze(ingredients: List[Dict[str, Any]]) -> Dict[str, Any]:
     return response.json()
 
 
-def build_prompt_from_plate(plate_result: Dict[str, Any]) -> str:
+def build_prompt_from_plate(plate_result: Dict[str, Any],
+    ingredients: List[Dict[str, Any]],) -> str:
     """Turn the plate analysis JSON into a natural-language prompt for the LLM.
 
     The prompt focuses on the main nutrients and highlights where the plate is
@@ -237,9 +256,51 @@ def build_prompt_from_plate(plate_result: Dict[str, Any]) -> str:
         "Based on this plate analysis, suggest concrete nutrition advice and, "
         "if useful, identify one main food item that should be swapped for a "
         "healthier alternative. Focus on practical, patient-friendly guidance."
+        "Provide only one suggestion per food_item. If there are multiple."
+    )
+    # Telling the model exactly which foods are on the plate
+    summary_lines.append(
+        "\nHere are the foods on the plate. Each food_name appears in single quotes. "
+        "When you call the tool, you must copy exactly one of the quoted food_name strings "
+        "as the `food_item` argument."
+    )
+    for ing in ingredients:
+        summary_lines.append(
+            f"- food_name='{ing['food_name']}')"
+        )
+
+    summary_lines.append(
+        "\nYou must always call the `suggest_food_swap` tool exactly once, "
+        "using one of the `food_name` values above as the `food_item` argument. "
+        "Do not ask the user for a food; pick one yourself."
+    )
+
+    summary_lines.append(
+        "When you propose swaps, they must make culinary sense: "
+        "swap a grain for another grain that could realistically replace it on the plate "
+        "(e.g. white rice → brown rice, quinoa, bulgur), not flour or raw ingredients. "
+        "Swap a protein for another cooked protein (e.g. chicken → tofu, fish, legumes), "
+        "not something from a completely different role. "
+        "You may suggest more than one swap (up to 3) if that helps balance the plate."
+    )
+
+    summary_lines.append(
+        "When you name the swapped-in food, use the exact `food_item` string from the database "
+        "(see the tool results), not a simplified or generic name."
+    )
+
+    summary_lines.append(
+        "\nYour response MUST follow this structure:\n"
+        "1. 2–3 sentences summarizing whether the plate is balanced, "
+        "   referring to the over/under nutrients above.\n"
+        "2. Clearly name one `food_name` from the list that you are swapping out.\n"
+        "3. Use the `suggest_food_swap` tool to get a concrete alternative.\n"
+        "4. In 2–3 sentences, explain why this swap helps with the specific "
+        "   nutrient gaps (e.g., lowers fat, increases fiber, etc.)."
     )
 
     return "\n".join(summary_lines)
+
 
 
 def run_plate_workflow(ingredients: List[Dict[str, Any]]) -> str:
@@ -257,15 +318,171 @@ def run_plate_workflow(ingredients: List[Dict[str, Any]]) -> str:
     plate_result = call_plate_analyze(ingredients)
 
     # 2) Turn result into a user-style prompt
-    user_prompt = build_prompt_from_plate(plate_result)
+    user_prompt = build_prompt_from_plate(plate_result, ingredients)
 
     # 3) Ask the model for advice. For now we use a simple single-turn call.
     model = build_model()
-    response = model.invoke(user_prompt)
+    messages = [HumanMessage(content=user_prompt)]
+    response = model.invoke(messages)
 
-    # Many LangChain chat models return an object with a `.content` attribute
-    # that holds the main text.
+    # If the model wants to call a tool, handle it
+    tool_calls = getattr(response, "tool_calls", None)
+    if tool_calls:
+        for tc in tool_calls:
+            if tc["name"] == "suggest_food_swap":
+                food_item = tc["args"]["food_item"]
+                tool_output = suggest_food_swap.invoke({"food_item": food_item})
+                messages.append(response)
+                messages.append(
+                    HumanMessage(content=f"Tool result for {food_item}:\n{tool_output}")
+                )
+                final = model.invoke(messages)
+                return getattr(final, "content", str(final))
+
+    # Fallback: no tool usage
     return getattr(response, "content", str(response))
+
+
+def suggestion_to_csv(response: str) -> str:
+    '''Build a prompt that asks the LLM to extract swap foods and grams from the
+    first LLM suggestion, and return them as a tiny CSV with columns:
+    food_name,grams.
+
+    The downstream code (`run_post_suggestion_prompt`) will parse this CSV and
+    turn it into a list of ingredient dicts:
+        [{"role": "...", "food_name": "...", "grams": ...}, ...]
+    which is what `compute_plate_nutrients` expects.
+    '''
+    # We include a snapshot of the foods table so the LLM can align names to
+    # real entries in the database, but here we only care about extracting
+    # `food_name` and `grams`.
+    preferred_columns = [
+        "food_item",
+        "plate_role",
+        "energy_kcal_calculated",
+        "fat_g",
+        "satfat_g",
+        "carbs_g",
+        "protein_g",
+        "fiber_g",
+    ]
+    available_columns = [c for c in preferred_columns if c in FOODS_DF.columns]
+    csv_snapshot = FOODS_DF[available_columns].to_csv(index=False)
+
+    prompt = f"""You are a data extraction assistant helping a nutrition app.
+
+        You are given:
+        1. A piece of nutrition advice produced by another model. This text may include
+        a section with tool output, for example lines like:
+            "Original food: ..."
+            "Suggested swap: Flour, buckwheat ..."
+        2. A CSV table describing foods and their nutritional information. The primary
+        key column in this table is called `food_item`.
+
+        Your task:
+        - Read the nutrition advice carefully.
+        - Identify all foods that are explicitly mentioned as **swapped-in** foods on
+        the new plate (i.e., foods that the patient should eat instead of the
+        original items). In particular, look for lines starting with phrases such as
+        "Suggested swap:" and use the food names that appear there.
+        - For each such food, find the closest matching `food_item` in the CSV snapshot.
+        You MUST choose the name from the `food_item` column, not invent new names.
+        Copy the `food_item` string exactly as written (including capitalization,
+        commas, and spaces).
+        - For each selected `food_item`, decide how many grams of that food will be on
+        the plate. If the advice does not clearly specify the amount, choose a
+        reasonable default such as 100 grams.
+        - Return ONLY a CSV with the header row:
+            food_name,grams
+        followed by one row per suggested food.
+
+        Requirements:
+        - The `food_name` column must contain only values that exactly match a
+        `food_item` from the CSV table.
+        - The `grams` column must be a number (no units or words).
+        - Do not output any markdown, explanation, commentary, or quotes—only raw CSV.
+
+        Nutrition advice:
+        \"\"\"{response}\"\"\"
+
+        CSV table (schema and data to reference; you do not need to repeat it):
+        {csv_snapshot}
+
+        Remember: your final answer must be only the CSV with columns:
+        food_name,grams
+        and nothing else.
+        """
+
+    return prompt
+
+def run_post_suggestion_prompt(response: str) -> Dict[str, List[Dict[str, Any]]]:
+    '''Second-stage LLM call that turns a free-text suggestion into a structured
+    list of ingredients compatible with `compute_plate_nutrients`.
+
+    It expects the model (guided by `suggestion_to_csv`) to return a CSV with:
+        food_name,grams
+    and converts that into:
+        {"food_swap_list": [{"role": "...", "food_name": "...", "grams": ...}, ...]}
+    '''
+    model = build_model()
+    prompt = suggestion_to_csv(response)
+    post_suggestion_result = model.invoke(prompt)
+
+    csv_text = getattr(post_suggestion_result, "content", str(post_suggestion_result)).strip()
+    if not csv_text:
+        return {"food_swap_list": []}
+
+    # Parse the returned CSV into a DataFrame
+    df_swaps = pd.read_csv(StringIO(csv_text))
+    if "food_name" not in df_swaps.columns or "grams" not in df_swaps.columns:
+        # Defensive fallback: nothing usable came back
+        return {"food_swap_list": []}
+
+    # Helper: resolve a free-text name to a canonical food_item in FOODS_DF
+    def resolve_to_food_item(name: str) -> Dict[str, Any] | None:
+        """Return a dict with canonical food_item and plate_role, or None if not found."""
+        if "food_item" not in FOODS_DF.columns or "plate_role" not in FOODS_DF.columns:
+            return None
+
+        names_lower = FOODS_DF["food_item"].astype(str).str.lower()
+        q = str(name).strip().lower()
+
+        # First try exact lower-case match
+        exact_mask = names_lower == q
+        if exact_mask.any():
+            row = FOODS_DF[exact_mask].iloc[0]
+            return {"food_item": row["food_item"], "plate_role": row["plate_role"]}
+
+        # Then try a more forgiving contains-based match
+        contains_mask = names_lower.str.contains(q, na=False)
+        if contains_mask.any():
+            row = FOODS_DF[contains_mask].iloc[0]
+            return {"food_item": row["food_item"], "plate_role": row["plate_role"]}
+
+        return None
+
+    food_swap_list: List[Dict[str, Any]] = []
+    for _, row in df_swaps.iterrows():
+        raw_name = str(row["food_name"])
+        grams_val = float(row["grams"])
+
+        resolved = resolve_to_food_item(raw_name)
+        if resolved is None:
+            # Skip foods we cannot map back to the database
+            continue
+
+        canonical_name = str(resolved["food_item"])
+        plate_role_value = str(resolved["plate_role"])
+
+        food_swap_list.append(
+            {
+                "role": plate_role_value,
+                "food_name": canonical_name,
+                "grams": grams_val,
+            }
+        )
+
+    return {"food_swap_list": food_swap_list}
 
 
 # ---------------------------------------------------------------------------
@@ -278,12 +495,18 @@ def main() -> None:
     In production, Streamlit should call `run_plate_workflow(...)` directly
     and display the returned text to the user.
     """
-    # Example ingredients; replace with real data in your Streamlit app.
-    example_ingredients: List[Dict[str, Any]] = [
-        {"role": "protein", "food_name": "Chicken Breast", "grams": 150},
-        {"role": "carb", "food_name": "White Rice", "grams": 120},
-        {"role": "veg", "food_name": "Broccoli", "grams": 80},
-    ]
+    # Build a simple example plate using the first few foods from FOODS_DF so that
+    # the names and roles are guaranteed to exist in the dataset.
+    example_ingredients: List[Dict[str, Any]] = []
+    role_column = "plate_role" if "plate_role" in FOODS_DF.columns else "role"
+    for _, row in FOODS_DF.head(3).iterrows():
+        example_ingredients.append(
+            {
+                "role": row.get(role_column, "other"),
+                "food_name": row["food_item"],
+                "grams": 100.0,
+            }
+        )
 
     advice = run_plate_workflow(example_ingredients)
     print("NutriMap LLM advice:\n")
