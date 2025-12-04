@@ -421,8 +421,8 @@ def run_post_suggestion_prompt(response: str) -> Dict[str, List[Dict[str, Any]]]
     """Second-stage LLM call that turns a free-text suggestion into a structured
     list of ingredients compatible with `compute_plate_nutrients`.
 
-    Expected LLM CSV output:
-        food_name,grams
+    Expected general format (per line):
+        <food_name>,<grams>
 
     Returned format:
         {"food_swap_list": [{"role": "...", "food_name": "...", "grams": ...}, ...]}
@@ -435,23 +435,19 @@ def run_post_suggestion_prompt(response: str) -> Dict[str, List[Dict[str, Any]]]
     if not csv_text:
         return {"food_swap_list": []}
 
-    # --- Manual CSV parsing to allow commas inside food names ---
+    # --- Manual CSV parsing, tolerant to headers and commas in names ---
     lines = [line.strip() for line in csv_text.splitlines() if line.strip()]
     if not lines:
         return {"food_swap_list": []}
 
-    # Expect header: food_name,grams
-    header_parts = [h.strip() for h in lines[0].split(",")]
-    if len(header_parts) < 2 or header_parts[0] != "food_name" or header_parts[1] != "grams":
-        return {"food_swap_list": []}
-
     rows = []
-    for line in lines[1:]:
+    for line in lines:
         # Split from the right: everything before last comma = name, last part = grams
         try:
             name_part, grams_part = line.rsplit(",", 1)
         except ValueError:
-            continue  # malformed line
+            # Cannot split into two parts -> skip
+            continue
 
         name_part = name_part.strip()
         grams_part = grams_part.strip()
@@ -459,10 +455,12 @@ def run_post_suggestion_prompt(response: str) -> Dict[str, List[Dict[str, Any]]]
         if not name_part or not grams_part:
             continue
 
+        # Try to interpret grams as a float; header lines will fail here
         try:
             grams_val = float(grams_part)
         except ValueError:
-            continue  # non-numeric grams
+            # Not numeric (likely a header row) -> skip
+            continue
 
         rows.append({"food_name": name_part, "grams": grams_val})
 
@@ -472,7 +470,6 @@ def run_post_suggestion_prompt(response: str) -> Dict[str, List[Dict[str, Any]]]
     df_swaps = pd.DataFrame(rows)
     # --- End of manual CSV parser ---
 
-    # Resolve model names to canonical food_item entries
     def resolve_to_food_item(name: str) -> Dict[str, Any] | None:
         """Return canonical food_item and plate_role from FOODS_DF, or None if not found."""
         if "food_item" not in FOODS_DF.columns or "plate_role" not in FOODS_DF.columns:
@@ -495,7 +492,6 @@ def run_post_suggestion_prompt(response: str) -> Dict[str, List[Dict[str, Any]]]
 
         return None
 
-    # Build final list
     food_swap_list: List[Dict[str, Any]] = []
     for _, row in df_swaps.iterrows():
         raw_name = str(row["food_name"])
@@ -514,6 +510,7 @@ def run_post_suggestion_prompt(response: str) -> Dict[str, List[Dict[str, Any]]]
         )
 
     return {"food_swap_list": food_swap_list}
+
 
 
 

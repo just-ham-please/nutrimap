@@ -195,47 +195,109 @@ if st.button("Analyze Plate"):
             gap_df = pd.DataFrame(gap_rows)
 
             if not gap_df.empty:
-                # Sort nutrients by absolute gap, biggest first
+                # Split kcal and non-kcal nutrients
                 gap_df["abs_delta"] = gap_df["delta_g"].abs()
+                is_kcal = gap_df["nutrient"].str.contains("kcal", case=False, na=False)
 
-                chart = (
-                    alt.Chart(gap_df)
-                    .mark_bar()
-                    .encode(
-                        y=alt.Y(
-                            "nutrient:N",
-                            sort=alt.SortField(field="abs_delta", order="descending"),
-                            title="Nutrient",
-                        ),
-                        x=alt.X(
-                            "delta_g:Q",
-                            title="Difference vs optimal (g)",
-                            scale=alt.Scale(zero=True),
-                        ),
-                        color=alt.condition(
-                            alt.datum.delta_g > 0,
-                            alt.value("#22A34F"),  # above optimal
-                            alt.value("#EF4444"),  # below optimal
-                        ),
-                        tooltip=[
-                            alt.Tooltip("nutrient:N", title="Nutrient"),
-                            alt.Tooltip("actual:Q", title="Actual"),
-                            alt.Tooltip("optimal:Q", title="Optimal"),
-                            alt.Tooltip("delta_g:Q", title="Δ vs optimal (g)"),
-                        ],
+                non_kcal_df = gap_df[~is_kcal]
+                kcal_df = gap_df[is_kcal]
+
+                # Chart for non-kcal nutrients (grams)
+                if not non_kcal_df.empty:
+                    chart = (
+                        alt.Chart(non_kcal_df)
+                        .mark_bar()
+                        .encode(
+                            y=alt.Y(
+                                "nutrient:N",
+                                sort=alt.SortField(field="abs_delta", order="descending"),
+                                title="Nutrient",
+                            ),
+                            x=alt.X(
+                                "delta_g:Q",
+                                title="Difference vs optimal (g)",
+                                scale=alt.Scale(zero=True),
+                            ),
+                            color=alt.condition(
+                                alt.datum.delta_g > 0,
+                                alt.value("#22A34F"),
+                                alt.value("#EF4444"),
+                            ),
+                            tooltip=[
+                                alt.Tooltip("nutrient:N", title="Nutrient"),
+                                alt.Tooltip("actual:Q", title="Actual"),
+                                alt.Tooltip("optimal:Q", title="Optimal"),
+                                alt.Tooltip("delta_g:Q", title="Δ vs optimal (g)"),
+                            ],
+                        )
+                        .properties(height=300)
                     )
-                    .properties(height=300)
-                )
 
-                zero_line = (
-                    alt.Chart(pd.DataFrame({"x": [0]}))
-                    .mark_rule(strokeDash=[4, 4])
-                    .encode(x="x:Q")
-                )
+                    zero_line = (
+                        alt.Chart(pd.DataFrame({"x": [0]}))
+                        .mark_rule(strokeDash=[4, 4])
+                        .encode(x="x:Q")
+                    )
 
-                st.altair_chart(chart + zero_line, use_container_width=True)
+                    st.altair_chart(chart + zero_line, use_container_width=True)
+                else:
+                    st.info("No non-kcal nutrient gaps to display.")
+
+                # Separate handling for kcal if present
+                if not kcal_df.empty:
+                    st.markdown("#### Energy (kcal)")
+                    for _, row in kcal_df.iterrows():
+                        st.write(
+                            f"**{row['nutrient']}** – Actual: {row['actual']:.0f} kcal, "
+                            f"Optimal: {row['optimal']:.0f} kcal, "
+                            f"Δ: {row['delta_g']:.0f} kcal"
+                        )
             else:
                 st.info("No nutrient gaps to display.")
+
+
+            # if not gap_df.empty:
+            #     # Sort nutrients by absolute gap, biggest first
+            #     gap_df["abs_delta"] = gap_df["delta_g"].abs()
+
+            #     chart = (
+            #         alt.Chart(gap_df)
+            #         .mark_bar()
+            #         .encode(
+            #             y=alt.Y(
+            #                 "nutrient:N",
+            #                 sort=alt.SortField(field="abs_delta", order="descending"),
+            #                 title="Nutrient",
+            #             ),
+            #             x=alt.X(
+            #                 "delta_g:Q",
+            #                 title="Difference vs optimal (g)",
+            #                 scale=alt.Scale(zero=True),
+            #             ),
+            #             color=alt.condition(
+            #                 alt.datum.delta_g > 0,
+            #                 alt.value("#22A34F"),  # above optimal
+            #                 alt.value("#EF4444"),  # below optimal
+            #             ),
+            #             tooltip=[
+            #                 alt.Tooltip("nutrient:N", title="Nutrient"),
+            #                 alt.Tooltip("actual:Q", title="Actual"),
+            #                 alt.Tooltip("optimal:Q", title="Optimal"),
+            #                 alt.Tooltip("delta_g:Q", title="Δ vs optimal (g)"),
+            #             ],
+            #         )
+            #         .properties(height=300)
+            #     )
+
+            #     zero_line = (
+            #         alt.Chart(pd.DataFrame({"x": [0]}))
+            #         .mark_rule(strokeDash=[4, 4])
+            #         .encode(x="x:Q")
+            #     )
+
+            #     st.altair_chart(chart + zero_line, use_container_width=True)
+            # else:
+            #     st.info("No nutrient gaps to display.")
 
             # ----------------------------------------------------
             # B) Table: Actual, Optimal, Deviations
@@ -339,45 +401,107 @@ if st.button("Analyze Plate"):
 
                     if not swap_gap_df.empty:
                         swap_gap_df["abs_delta"] = swap_gap_df["delta_g"].abs()
+                        is_kcal_swap = swap_gap_df["nutrient"].str.contains("kcal", case=False, na=False)
 
-                        chart_swap = (
-                            alt.Chart(swap_gap_df)
-                            .mark_bar()
-                            .encode(
-                                y=alt.Y(
-                                    "nutrient:N",
-                                    sort=alt.SortField(field="abs_delta", order="descending"),
-                                    title="Nutrient",
-                                ),
-                                x=alt.X(
-                                    "delta_g:Q",
-                                    title="Difference vs optimal (g)",
-                                    scale=alt.Scale(zero=True),
-                                ),
-                                color=alt.condition(
-                                    alt.datum.delta_g > 0,
-                                    alt.value("#22A34F"),  # above optimal
-                                    alt.value("#EF4444"),  # below optimal
-                                ),
-                                tooltip=[
-                                    alt.Tooltip("nutrient:N", title="Nutrient"),
-                                    alt.Tooltip("actual:Q", title="Actual (swap)"),
-                                    alt.Tooltip("optimal:Q", title="Optimal"),
-                                    alt.Tooltip("delta_g:Q", title="Δ vs optimal (g)"),
-                                ],
+                        non_kcal_swap_df = swap_gap_df[~is_kcal_swap]
+                        kcal_swap_df = swap_gap_df[is_kcal_swap]
+
+                        # Chart for non-kcal nutrients after swap
+                        if not non_kcal_swap_df.empty:
+                            chart_swap = (
+                                alt.Chart(non_kcal_swap_df)
+                                .mark_bar()
+                                .encode(
+                                    y=alt.Y(
+                                        "nutrient:N",
+                                        sort=alt.SortField(field="abs_delta", order="descending"),
+                                        title="Nutrient",
+                                    ),
+                                    x=alt.X(
+                                        "delta_g:Q",
+                                        title="Difference vs optimal (g)",
+                                        scale=alt.Scale(zero=True),
+                                    ),
+                                    color=alt.condition(
+                                        alt.datum.delta_g > 0,
+                                        alt.value("#22A34F"),
+                                        alt.value("#EF4444"),
+                                    ),
+                                    tooltip=[
+                                        alt.Tooltip("nutrient:N", title="Nutrient"),
+                                        alt.Tooltip("actual:Q", title="Actual (swap)"),
+                                        alt.Tooltip("optimal:Q", title="Optimal"),
+                                        alt.Tooltip("delta_g:Q", title="Δ vs optimal (g)"),
+                                    ],
+                                )
+                                .properties(height=300)
                             )
-                            .properties(height=300)
-                        )
 
-                        zero_line_swap = (
-                            alt.Chart(pd.DataFrame({"x": [0]}))
-                            .mark_rule(strokeDash=[4, 4])
-                            .encode(x="x:Q")
-                        )
+                            zero_line_swap = (
+                                alt.Chart(pd.DataFrame({"x": [0]}))
+                                .mark_rule(strokeDash=[4, 4])
+                                .encode(x="x:Q")
+                            )
 
-                        st.altair_chart(chart_swap + zero_line_swap, use_container_width=True)
+                            st.altair_chart(chart_swap + zero_line_swap, use_container_width=True)
+                        else:
+                            st.info("No non-kcal nutrient gaps to display for swap.")
+
+                        # Separate handling for kcal after swap
+                        if not kcal_swap_df.empty:
+                            st.markdown("#### Energy (kcal) after swap")
+                            for _, row in kcal_swap_df.iterrows():
+                                st.write(
+                                    f"**{row['nutrient']}** – Actual (swap): {row['actual']:.0f} kcal, "
+                                    f"Optimal: {row['optimal']:.0f} kcal, "
+                                    f"Δ: {row['delta_g']:.0f} kcal"
+                                )
                     else:
                         st.info("No nutrient gaps to display for swap.")
+
+
+
+                    # if not swap_gap_df.empty:
+                    #     swap_gap_df["abs_delta"] = swap_gap_df["delta_g"].abs()
+
+                    #     chart_swap = (
+                    #         alt.Chart(swap_gap_df)
+                    #         .mark_bar()
+                    #         .encode(
+                    #             y=alt.Y(
+                    #                 "nutrient:N",
+                    #                 sort=alt.SortField(field="abs_delta", order="descending"),
+                    #                 title="Nutrient",
+                    #             ),
+                    #             x=alt.X(
+                    #                 "delta_g:Q",
+                    #                 title="Difference vs optimal (g)",
+                    #                 scale=alt.Scale(zero=True),
+                    #             ),
+                    #             color=alt.condition(
+                    #                 alt.datum.delta_g > 0,
+                    #                 alt.value("#22A34F"),  # above optimal
+                    #                 alt.value("#EF4444"),  # below optimal
+                    #             ),
+                    #             tooltip=[
+                    #                 alt.Tooltip("nutrient:N", title="Nutrient"),
+                    #                 alt.Tooltip("actual:Q", title="Actual (swap)"),
+                    #                 alt.Tooltip("optimal:Q", title="Optimal"),
+                    #                 alt.Tooltip("delta_g:Q", title="Δ vs optimal (g)"),
+                    #             ],
+                    #         )
+                    #         .properties(height=300)
+                    #     )
+
+                    #     zero_line_swap = (
+                    #         alt.Chart(pd.DataFrame({"x": [0]}))
+                    #         .mark_rule(strokeDash=[4, 4])
+                    #         .encode(x="x:Q")
+                    #     )
+
+                    #     st.altair_chart(chart_swap + zero_line_swap, use_container_width=True)
+                    # else:
+                    #     st.info("No nutrient gaps to display for swap.")
 
             except Exception as e:
                 st.error(f"Error while computing food swap comparison: {e}")
