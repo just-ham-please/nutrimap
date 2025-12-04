@@ -418,14 +418,15 @@ def suggestion_to_csv(response: str) -> str:
 
 # Function that runs the extraction of suggestion from suggestion reposone
 def run_post_suggestion_prompt(response: str) -> Dict[str, List[Dict[str, Any]]]:
-    '''Second-stage LLM call that turns a free-text suggestion into a structured
+    """Second-stage LLM call that turns a free-text suggestion into a structured
     list of ingredients compatible with `compute_plate_nutrients`.
 
-    It expects the model (guided by `suggestion_to_csv`) to return a CSV with:
+    Expected LLM CSV output:
         food_name,grams
-    and converts that into:
+
+    Returned format:
         {"food_swap_list": [{"role": "...", "food_name": "...", "grams": ...}, ...]}
-    '''
+    """
     model = build_model()
     prompt = suggestion_to_csv(response)
     post_suggestion_result = model.invoke(prompt)
@@ -434,28 +435,59 @@ def run_post_suggestion_prompt(response: str) -> Dict[str, List[Dict[str, Any]]]
     if not csv_text:
         return {"food_swap_list": []}
 
-    # Parse the returned CSV into a DataFrame
-    df_swaps = pd.read_csv(StringIO(csv_text))
-    if "food_name" not in df_swaps.columns or "grams" not in df_swaps.columns:
-        # Defensive fallback: nothing usable came back
+    # --- Manual CSV parsing to allow commas inside food names ---
+    lines = [line.strip() for line in csv_text.splitlines() if line.strip()]
+    if not lines:
         return {"food_swap_list": []}
 
-    # Helper: resolve a free-text name to a canonical food_item in FOODS_DF
+    # Expect header: food_name,grams
+    header_parts = [h.strip() for h in lines[0].split(",")]
+    if len(header_parts) < 2 or header_parts[0] != "food_name" or header_parts[1] != "grams":
+        return {"food_swap_list": []}
+
+    rows = []
+    for line in lines[1:]:
+        # Split from the right: everything before last comma = name, last part = grams
+        try:
+            name_part, grams_part = line.rsplit(",", 1)
+        except ValueError:
+            continue  # malformed line
+
+        name_part = name_part.strip()
+        grams_part = grams_part.strip()
+
+        if not name_part or not grams_part:
+            continue
+
+        try:
+            grams_val = float(grams_part)
+        except ValueError:
+            continue  # non-numeric grams
+
+        rows.append({"food_name": name_part, "grams": grams_val})
+
+    if not rows:
+        return {"food_swap_list": []}
+
+    df_swaps = pd.DataFrame(rows)
+    # --- End of manual CSV parser ---
+
+    # Resolve model names to canonical food_item entries
     def resolve_to_food_item(name: str) -> Dict[str, Any] | None:
-        """Return a dict with canonical food_item and plate_role, or None if not found."""
+        """Return canonical food_item and plate_role from FOODS_DF, or None if not found."""
         if "food_item" not in FOODS_DF.columns or "plate_role" not in FOODS_DF.columns:
             return None
 
         names_lower = FOODS_DF["food_item"].astype(str).str.lower()
         q = str(name).strip().lower()
 
-        # First try exact lower-case match
+        # Exact match
         exact_mask = names_lower == q
         if exact_mask.any():
             row = FOODS_DF[exact_mask].iloc[0]
             return {"food_item": row["food_item"], "plate_role": row["plate_role"]}
 
-        # Then try a more forgiving contains-based match
+        # Fuzzy "contains" match
         contains_mask = names_lower.str.contains(q, na=False)
         if contains_mask.any():
             row = FOODS_DF[contains_mask].iloc[0]
@@ -463,6 +495,7 @@ def run_post_suggestion_prompt(response: str) -> Dict[str, List[Dict[str, Any]]]
 
         return None
 
+    # Build final list
     food_swap_list: List[Dict[str, Any]] = []
     for _, row in df_swaps.iterrows():
         raw_name = str(row["food_name"])
@@ -470,21 +503,18 @@ def run_post_suggestion_prompt(response: str) -> Dict[str, List[Dict[str, Any]]]
 
         resolved = resolve_to_food_item(raw_name)
         if resolved is None:
-            # Skip foods we cannot map back to the database
             continue
-
-        canonical_name = str(resolved["food_item"])
-        plate_role_value = str(resolved["plate_role"])
 
         food_swap_list.append(
             {
-                "role": plate_role_value,
-                "food_name": canonical_name,
+                "role": str(resolved["plate_role"]),
+                "food_name": str(resolved["food_item"]),
                 "grams": grams_val,
             }
         )
 
     return {"food_swap_list": food_swap_list}
+
 
 
 # ---------------------------------------------------------------------------
