@@ -15,9 +15,28 @@ API_URL = "http://127.0.0.1:8000"   # Lokales Backend
 # API_URL = "https://dein-backend-url"
 
 
-st.set_page_config(page_title="NutriMap – Plate Analyzer", layout="centered")
-st.title("NutriMap – Plate Analyzer 🍽️")
+st.set_page_config(page_title="NutriMap – Eat Better. Feel Better.", layout="centered")
 
+st.markdown("""
+<style>
+/* Primary button leicht anpassen (optional, weil Theme schon greift) */
+.stButton > button {
+    background-color: #22A34F;
+    color: white;
+    border-radius: 8px;
+    border: none;
+    padding: 0.4rem 0.9rem;
+}
+.stButton > button:hover {
+    background-color: #1B7C3A;
+    color: white;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+st.title("NutriMap")
+st.subheader("Analyze and Optimize Your Plate 🍽️")
 
 # ------------------------------------------------------------
 # LOAD FOOD DATA
@@ -43,26 +62,85 @@ role_to_food_list = {
 # UI: INGREDIENT SELECTION
 # ------------------------------------------------------------
 
-st.subheader("1️⃣ Select Ingredients")
+st.subheader("1️⃣ Build your plate")
+st.markdown("Pick one main food per role and an approximate portion size in grams.")
 
-cols = st.columns(4)
+def role_row(icon, title, subtitle, options, default_grams, key_prefix):
+    st.markdown(f"{icon} **{title}**")
+    st.caption(subtitle)
 
-protein_item = cols[0].selectbox("Protein", role_to_food_list["protein"])
-carb_item    = cols[1].selectbox("Carb",    role_to_food_list["carbs"])
-veg_item     = cols[2].selectbox("Veg",     role_to_food_list["fruit / veg"])
-fat_item     = cols[3].selectbox("Fat",     role_to_food_list["fat"])
+    col1, col2 = st.columns([2.5, 1])
+    with col1:
+        item = st.selectbox(
+            "Food",
+            options,
+            index=None,
+            placeholder=f"Select {title.lower()}...",
+            key=f"{key_prefix}_food",
+        )
+    with col2:
+        grams = st.number_input(
+            "Amount (g)",
+            min_value=0,
+            max_value=500,
+            value=default_grams,
+            step=10,
+            key=f"{key_prefix}_grams",
+        )
+
+    return item, grams
 
 
-st.subheader("2️⃣ Specify Amounts (grams)")
+protein_item, protein_g = role_row(
+    "🥩",
+    "Protein",
+    "Main protein of your meal.",
+    role_to_food_list["protein"],
+    default_grams=150,
+    key_prefix="protein",
+)
 
-gcols = st.columns(4)
+st.markdown("<hr style='margin:1.2rem 0; border:0; border-top:1px solid #D1D5DB;'>", unsafe_allow_html=True)
 
-protein_g = gcols[0].number_input("Protein (g)", min_value=0, max_value=500, value=150, step=10)
-carb_g    = gcols[1].number_input("Carb (g)",    min_value=0, max_value=500, value=120, step=10)
-veg_g     = gcols[2].number_input("Veg (g)",     min_value=0, max_value=500, value=80,  step=10)
-fat_g     = gcols[3].number_input("Fat (g)",     min_value=0, max_value=200, value=10,  step=5)
 
-# Payload für Backend
+carb_item, carb_g = role_row(
+    "🍚",
+    "Carbs",
+    "Main carb or starch on your plate.",
+    role_to_food_list["carbs"],
+    default_grams=120,
+    key_prefix="carb",
+)
+
+st.markdown("<hr style='margin:1.2rem 0; border:0; border-top:1px solid #D1D5DB;'>", unsafe_allow_html=True)
+
+
+veg_item, veg_g = role_row(
+    "🥦",
+    "Veg & Fruit",
+    "Non-starchy vegetables or fruit.",
+    role_to_food_list["fruit / veg"],
+    default_grams=80,
+    key_prefix="veg",
+)
+
+st.markdown("<hr style='margin:1.2rem 0; border:0; border-top:1px solid #D1D5DB;'>", unsafe_allow_html=True)
+
+
+fat_item, fat_g = role_row(
+    "🥜",
+    "Fats & Extras",
+    "Oils, nuts, seeds or dressings.",
+    role_to_food_list["fat"],
+    default_grams=10,
+    key_prefix="fat",
+)
+
+st.markdown("<hr style='margin:1.2rem 0; border:0; border-top:1px solid #D1D5DB;'>", unsafe_allow_html=True)
+
+
+
+# Payload for Backend
 payload = {
     "ingredients": [
         {"role": "protein", "food_name": protein_item, "grams": protein_g},
@@ -74,154 +152,235 @@ payload = {
 
 
 # ------------------------------------------------------------
-# API CALL + VISUALISIERUNG
+# API CALL + VISUALS
 # ------------------------------------------------------------
 
-st.subheader("3️⃣ Analyze your plate")
+st.subheader("2️⃣ Analyze your plate")
 
 if st.button("Analyze Plate"):
-    st.write("Sending request...")
-
-    try:
-        resp = requests.post(f"{API_URL}/plate/analyze", json=payload, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-
-        st.success("Plate analyzed successfully!")
-
-        actual = data["actual"]
-        target = data["target"]
-        gaps   = data["gaps"]
-
-        # ----------------------------------------------------
-        # A) Prozent des Optimalwerts (0–200 % Skala)
-        # ----------------------------------------------------
-        st.subheader("📊 Coverage vs. Optimal (in %)")
-
-        percent_rows = []
-        for nutrient, a_val in actual.items():
-            t_val = target.get(nutrient, 0)
-            if t_val and t_val != 0:
-                pct = a_val / t_val * 100
-                percent_rows.append({
-                    "nutrient": nutrient,
-                    "percent_of_optimal": pct
-                })
-
-        percent_df = pd.DataFrame(percent_rows)
-
-        if not percent_df.empty:
-            chart = (
-                alt.Chart(percent_df)
-                .mark_bar()
-                .encode(
-                    x=alt.X("nutrient:N", title="Nutrient"),
-                    y=alt.Y(
-                        "percent_of_optimal:Q",
-                        title="% of optimal",
-                        scale=alt.Scale(domain=[0, 200])  # 0–200 % Anzeige
-                    ),
-                    tooltip=["nutrient", "percent_of_optimal"]
-                )
-                .properties(height=300)
-            )
-
-            # Referenzlinie bei 100 %
-            rule = alt.Chart(pd.DataFrame({"y": [100]})).mark_rule(strokeDash=[4, 4]).encode(y="y:Q")
-
-            st.altair_chart(chart + rule, use_container_width=True)
-        else:
-            st.info("No nutrients with non-zero targets found for percentage chart.")
-
-        # ----------------------------------------------------
-        # B) Tabelle: Actual, Optimal, Abweichungen
-        # ----------------------------------------------------
-        st.subheader("📋 Nutrient Details")
-
-        table_rows = []
-        for nutrient, gap in gaps.items():
-            table_rows.append({
-                "Nutrient": nutrient,
-                "Actual": gap["actual"],
-                "Optimal": gap["target"],
-                "Δ abs": gap["delta"],
-                "Δ %": gap["delta_pct"],
-            })
-
-        table_df = pd.DataFrame(table_rows)
-        table_df = table_df.set_index("Nutrient")
-
-        st.dataframe(table_df)
-
-        # ----------------------------------------------------
-        # C) Debug ganz unten
-        # ----------------------------------------------------
-        # st.subheader("🛠 Debug: Raw API Response")
-        # st.json(data)
-
-        # ----------------------------------------------------
-        # D) Suggestions from LLM
-        # ----------------------------------------------------
-        st.subheader("4️⃣ Suggestions")
+    # Basic validation: all roles must have a selected food
+    if any(x is None for x in [protein_item, carb_item, veg_item, fat_item]):
+        st.error("Please select a food for each role before analyzing your plate.")
+    else:
+        st.write("Sending request...")
 
         try:
-            # Use the same ingredients the user selected to drive the LLM workflow.
-            llm_response = run_plate_workflow(payload["ingredients"])
+            resp = requests.post(f"{API_URL}/plate/analyze", json=payload, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
 
-            # Nicely formatted LLM output
-            st.markdown("#### Personalized nutrition advice")
-            st.markdown(llm_response)
-        except Exception as e:
-            st.error(f"Error while generating suggestions: {e}")
+            st.success("Plate analyzed successfully!")
 
-        # ----------------------------------------------------
-        # E) Food swaps visualization from LLM
-        # ----------------------------------------------------
-        st.subheader("5️⃣ Food Swap – Nutrient Comparison")
+            actual = data["actual"]
+            target = data["target"]
+            gaps   = data["gaps"]
 
+            # ----------------------------------------------------
+            # A) Nutrient gaps vs optimal (in grams)
+            # ----------------------------------------------------
+            st.subheader("📊 Nutrient gaps vs optimal (g)")
 
-
-        try:
-            # 1) Let the LLM workflow extract the swapped foods from its own suggestion text
-            post_suggestion_result = run_post_suggestion_prompt(llm_response)
-
-            # Nicely formatted swap info
-            st.markdown("#### Food Swap Comparison")
-
-            food_swaps = post_suggestion_result.get("food_swap_list", [])
-
-            if not food_swaps:
-                st.info("No swap foods were suggested.")
-            else:
-                st.markdown("**Suggested swap food(s):**")
-                for swap in food_swaps:
-                    st.markdown(
-                        f"- `{swap['food_name']}` "
-                        f"(role: {swap['role']}, grams: {swap['grams']})"
-                    )
-
-            # 2) Use the plate optimizer helper to compute nutrients for the suggested swap
-            swap_comparison = post_suggestion_comparison(post_suggestion_result)
-
-            gaps_swap = swap_comparison["gaps_swap"]
-
-            swap_rows = []
-            for nutrient, gap in gaps_swap.items():
-                swap_rows.append(
+            gap_rows = []
+            for nutrient, gap in gaps.items():
+                delta = gap["delta"]  # positive = above optimal, negative = below
+                gap_rows.append(
                     {
-                        "Nutrient": nutrient,
-                        "Actual (swap)": gap["actual"],
-                        "Optimal": gap["target"],
-                        "Δ abs (swap)": gap["delta"],
-                        "Δ % (swap)": gap["delta_pct"],
+                        "nutrient": nutrient,
+                        "delta_g": delta,
+                        "actual": gap["actual"],
+                        "optimal": gap["target"],
                     }
                 )
 
-            swap_df = pd.DataFrame(swap_rows).set_index("Nutrient")
-            st.dataframe(swap_df)
+            gap_df = pd.DataFrame(gap_rows)
+
+            if not gap_df.empty:
+                # Sort nutrients by absolute gap, biggest first
+                gap_df["abs_delta"] = gap_df["delta_g"].abs()
+
+                chart = (
+                    alt.Chart(gap_df)
+                    .mark_bar()
+                    .encode(
+                        y=alt.Y(
+                            "nutrient:N",
+                            sort=alt.SortField(field="abs_delta", order="descending"),
+                            title="Nutrient",
+                        ),
+                        x=alt.X(
+                            "delta_g:Q",
+                            title="Difference vs optimal (g)",
+                            scale=alt.Scale(zero=True),
+                        ),
+                        color=alt.condition(
+                            alt.datum.delta_g > 0,
+                            alt.value("#22A34F"),  # above optimal
+                            alt.value("#EF4444"),  # below optimal
+                        ),
+                        tooltip=[
+                            alt.Tooltip("nutrient:N", title="Nutrient"),
+                            alt.Tooltip("actual:Q", title="Actual"),
+                            alt.Tooltip("optimal:Q", title="Optimal"),
+                            alt.Tooltip("delta_g:Q", title="Δ vs optimal (g)"),
+                        ],
+                    )
+                    .properties(height=300)
+                )
+
+                zero_line = (
+                    alt.Chart(pd.DataFrame({"x": [0]}))
+                    .mark_rule(strokeDash=[4, 4])
+                    .encode(x="x:Q")
+                )
+
+                st.altair_chart(chart + zero_line, use_container_width=True)
+            else:
+                st.info("No nutrient gaps to display.")
+
+            # ----------------------------------------------------
+            # B) Table: Actual, Optimal, Deviations
+            # ----------------------------------------------------
+            st.subheader("📋 Nutrient details")
+
+            table_rows = []
+            for nutrient, gap in gaps.items():
+                table_rows.append(
+                    {
+                        "Nutrient": nutrient,
+                        "Actual": gap["actual"],
+                        "Optimal": gap["target"],
+                        "Δ abs": gap["delta"],
+                        "Δ %": gap["delta_pct"],
+                    }
+                )
+
+            table_df = pd.DataFrame(table_rows).set_index("Nutrient")
+            st.dataframe(table_df)
+
+            # ----------------------------------------------------
+            # C) Suggestions from LLM
+            # ----------------------------------------------------
+            st.subheader("4️⃣ Suggestions")
+
+            try:
+                # Use the same ingredients the user selected to drive the LLM workflow.
+                llm_response = run_plate_workflow(payload["ingredients"])
+
+                st.markdown("#### Personalized nutrition advice")
+                st.markdown(llm_response)
+            except Exception as e:
+                st.error(f"Error while generating suggestions: {e}")
+                llm_response = None  # so we do not crash below
+
+            # ----------------------------------------------------
+            # D) Food swaps visualization from LLM
+            # ----------------------------------------------------
+            st.subheader("5️⃣ Food Swap – Nutrient comparison")
+
+            try:
+                if not llm_response:
+                    st.info("No LLM response available to derive food swaps.")
+                else:
+                    # 1) Let the LLM workflow extract the swapped foods from its own suggestion text
+                    post_suggestion_result = run_post_suggestion_prompt(llm_response)
+
+                    st.markdown("#### Food swap comparison")
+
+                    food_swaps = post_suggestion_result.get("food_swap_list", [])
+
+                    if not food_swaps:
+                        st.info("No swap foods were suggested.")
+                    else:
+                        st.markdown("**Suggested swap food(s):**")
+                        for swap in food_swaps:
+                            st.markdown(
+                                f"- `{swap['food_name']}` "
+                                f"(role: {swap['role']}, grams: {swap['grams']})"
+                            )
+
+                    # 2) Compute nutrients for the suggested swap
+                    swap_comparison = post_suggestion_comparison(post_suggestion_result)
+
+                    gaps_swap = swap_comparison["gaps_swap"]
+
+                    swap_rows = []
+                    for nutrient, gap in gaps_swap.items():
+                        swap_rows.append(
+                            {
+                                "Nutrient": nutrient,
+                                "Actual (swap)": gap["actual"],
+                                "Optimal": gap["target"],
+                                "Δ abs (swap)": gap["delta"],
+                                "Δ % (swap)": gap["delta_pct"],
+                            }
+                        )
+
+                    swap_df = pd.DataFrame(swap_rows).set_index("Nutrient")
+                    st.dataframe(swap_df)
+
+                    # ----------------------------------------------------
+                    # E) Nutrient gaps after swap (in grams)
+                    # ----------------------------------------------------
+                    st.subheader("📊 Nutrient gaps after swap (g)")
+
+                    swap_gap_rows = []
+                    for nutrient, gap in gaps_swap.items():
+                        delta = gap["delta"]  # positive = above optimal, negative = below
+                        swap_gap_rows.append(
+                            {
+                                "nutrient": nutrient,
+                                "delta_g": delta,
+                                "actual": gap["actual"],
+                                "optimal": gap["target"],
+                            }
+                        )
+
+                    swap_gap_df = pd.DataFrame(swap_gap_rows)
+
+                    if not swap_gap_df.empty:
+                        swap_gap_df["abs_delta"] = swap_gap_df["delta_g"].abs()
+
+                        chart_swap = (
+                            alt.Chart(swap_gap_df)
+                            .mark_bar()
+                            .encode(
+                                y=alt.Y(
+                                    "nutrient:N",
+                                    sort=alt.SortField(field="abs_delta", order="descending"),
+                                    title="Nutrient",
+                                ),
+                                x=alt.X(
+                                    "delta_g:Q",
+                                    title="Difference vs optimal (g)",
+                                    scale=alt.Scale(zero=True),
+                                ),
+                                color=alt.condition(
+                                    alt.datum.delta_g > 0,
+                                    alt.value("#22A34F"),  # above optimal
+                                    alt.value("#EF4444"),  # below optimal
+                                ),
+                                tooltip=[
+                                    alt.Tooltip("nutrient:N", title="Nutrient"),
+                                    alt.Tooltip("actual:Q", title="Actual (swap)"),
+                                    alt.Tooltip("optimal:Q", title="Optimal"),
+                                    alt.Tooltip("delta_g:Q", title="Δ vs optimal (g)"),
+                                ],
+                            )
+                            .properties(height=300)
+                        )
+
+                        zero_line_swap = (
+                            alt.Chart(pd.DataFrame({"x": [0]}))
+                            .mark_rule(strokeDash=[4, 4])
+                            .encode(x="x:Q")
+                        )
+
+                        st.altair_chart(chart_swap + zero_line_swap, use_container_width=True)
+                    else:
+                        st.info("No nutrient gaps to display for swap.")
+
+            except Exception as e:
+                st.error(f"Error while computing food swap comparison: {e}")
 
         except Exception as e:
-            st.error(f"Error while computing food swap comparison: {e}")
-
-    except Exception as e:
-        st.error(f"Error: {e}")
+            st.error(f"Error: {e}")
