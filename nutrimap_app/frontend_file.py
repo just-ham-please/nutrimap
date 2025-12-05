@@ -3,8 +3,9 @@ import requests
 import pandas as pd
 import altair as alt
 from pathlib import Path
-from nutrimap_app.llm_workflow import run_plate_workflow, run_post_suggestion_prompt
-from nutrimap_app.plate_optimizer import post_suggestion_comparison
+from llm_workflow import run_plate_workflow, run_post_suggestion_prompt
+from plate_optimizer import post_suggestion_comparison
+
 
 # ------------------------------------------------------------
 # CONFIG
