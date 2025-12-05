@@ -1,9 +1,13 @@
 FROM python:3.12.9
+WORKDIR /app
+
 
 COPY models models
-COPY package_folder package_folder
+COPY nutrimap_app nutrimap_app
 COPY requirements.txt requirements.txt
 COPY setup.py setup.py
+COPY data data
+
 
 RUN pip install --upgrade pip
 RUN pip install -e .
@@ -12,4 +16,5 @@ RUN pip install -e .
 # CMD uvicorn package_folder.api_file:app --reload --host 0.0.0.0
 
 #Run conainer deployed -> GCP
-CMD uvicorn package_folder.api_file:app --reload --host 0.0.0.0 --port $PORT
+ENV PORT=8080
+CMD uvicorn nutrimap_app.api_file:app --reload --host 0.0.0.0 --port $PORT

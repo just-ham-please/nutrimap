@@ -29,7 +29,7 @@ from langchain_core.messages import HumanMessage
 from langchain.tools import tool
 
 # For local development - API_URL to get access to the responses from the front_end
-API_URL = "http://127.0.0.1:8000"
+API_URL = "http://127.0.0.1:8080"
 
 # ---------------------------------------------------------------------------
 # Configuration & data loading

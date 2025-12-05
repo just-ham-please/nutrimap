@@ -10,9 +10,9 @@ from nutrimap_app.plate_optimizer import post_suggestion_comparison
 # CONFIG
 # ------------------------------------------------------------
 
-API_URL = "http://127.0.0.1:8000"   # Lokales Backend
-# Für Deployment später z. B.:
-# API_URL = "https://dein-backend-url"
+#API_URL = "http://127.0.0.1:8080"   # Lokales Backend
+# For Deployment
+API_URL = "https://nutrimap-backend-1002154750813.europe-west1.run.app"
 
 
 st.set_page_config(page_title="NutriMap – Eat Better. Feel Better.", layout="centered")
@@ -216,13 +216,9 @@ if st.button("Analyze Plate"):
                             x=alt.X(
                                 "delta_g:Q",
                                 title="Difference vs optimal (g)",
-                                scale=alt.Scale(zero=True),
+                                scale=alt.Scale(domain=[-50, 50]),
                             ),
-                            color=alt.condition(
-                                alt.datum.delta_g > 0,
-                                alt.value("#22A34F"),
-                                alt.value("#EF4444"),
-                            ),
+                            color=alt.value("#22A34F"),
                             tooltip=[
                                 alt.Tooltip("nutrient:N", title="Nutrient"),
                                 alt.Tooltip("actual:Q", title="Actual"),
@@ -420,13 +416,9 @@ if st.button("Analyze Plate"):
                                     x=alt.X(
                                         "delta_g:Q",
                                         title="Difference vs optimal (g)",
-                                        scale=alt.Scale(zero=True),
+                                        scale=alt.Scale(domain=[-50, 50]),
                                     ),
-                                    color=alt.condition(
-                                        alt.datum.delta_g > 0,
-                                        alt.value("#22A34F"),
-                                        alt.value("#EF4444"),
-                                    ),
+                                    color=alt.value("#22A34F"),
                                     tooltip=[
                                         alt.Tooltip("nutrient:N", title="Nutrient"),
                                         alt.Tooltip("actual:Q", title="Actual (swap)"),
