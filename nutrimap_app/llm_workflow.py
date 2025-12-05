@@ -41,7 +41,7 @@ load_dotenv()
 GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "gemini-2.0-flash")
 GEMINI_TEMPERATURE = float(os.getenv("GEMINI_TEMPERATURE", "0.3"))
 GEMINI_MAX_OUTPUT_TOKENS = int(os.getenv("GEMINI_MAX_OUTPUT_TOKENS", "512"))
-ROOT = Path(__file__).resolve().parent.parent   # = Repo root
+ROOT = Path(__file__).resolve().parent.parent
 FOODS_CSV_PATH = ROOT / "data" / "processed" / "food_with_plate_roles.csv"
 
 # Load food dataset once at startup
