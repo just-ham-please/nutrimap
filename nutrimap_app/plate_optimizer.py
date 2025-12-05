@@ -1,6 +1,7 @@
 import pandas as pd
 from pathlib import Path
-from nutrimap_app.llm_workflow import run_post_suggestion_prompt
+from llm_workflow import run_post_suggestion_prompt
+
 
 # ------------------------------------------------------------
 # 1. GLOBAL SETTINGS
