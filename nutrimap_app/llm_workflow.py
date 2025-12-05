@@ -30,7 +30,15 @@ from langchain_core.messages import HumanMessage
 from langchain.tools import tool
 
 # For local development - API_URL to get access to the responses from the front_end
-API_URL = "http://127.0.0.1:8080"
+#API_URL = "http://127.0.0.1:8080"
+
+import os
+
+API_URL = os.getenv(
+    "API_URL",
+    "https://nutrimap-backend-1002154750813.europe-west1.run.app",
+)
+
 
 # ---------------------------------------------------------------------------
 # Configuration & data loading
